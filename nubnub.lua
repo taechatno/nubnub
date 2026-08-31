@@ -3,7 +3,7 @@ local TeleportService = game:GetService("TeleportService")
 
 local blacklist = {
     ["Ollightw99"] = true,
-    ["PlayerName2"] = true,
+    ["im_mythaw"] = true,
     ["PlayerName3"] = true
 }
 
