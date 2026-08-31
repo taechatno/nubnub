@@ -77,11 +77,11 @@ local Tab = Window:Tab({
 
 local AutoLeaveToggle
 
-AutoLeaveToggle = Tab:Toggle({
-    Title = "Auto Leave",
-    Desc = "Leave server when target player is found",
+AutoChangeServerToggle = Tab:Toggle({
+    Title = "Auto Change Server",
+    Desc = "Change server when target player is found",
 
-    Flag = "AutoLeave",
+    Flag = "AutoChangeServer",
 
     Value = true,
 
@@ -292,8 +292,8 @@ if Config then
 
     -- Register ทุก Element
     Config:Register(
-        "AutoLeave",
-        AutoLeaveToggle
+        "AutoChangeServer",
+        AutoChangeServerToggle
     )
 
     for i = 1, MAX_USERS do
@@ -318,7 +318,7 @@ task.wait(1)
 configLoaded = true
 
 -- อ่านค่าปัจจุบันหลัง Load
-enabled = AutoLeaveToggle.Value
+enabled = AutoChangeServerToggle.Value
 
 for i = 1, MAX_USERS do
 
