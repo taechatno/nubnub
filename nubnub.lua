@@ -1,7 +1,11 @@
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 
--- WindUI
+--==================================================
+-- WINDUI
+--==================================================
+
 local WindUI = loadstring(game:HttpGet(
     "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
 ))()
@@ -13,8 +17,10 @@ local player = Players.LocalPlayer
 --==================================================
 
 local MAX_USERS = 15
+
 local enabled = true
 local usernameValues = {}
+local WebhookURL = ""
 
 for i = 1, MAX_USERS do
     usernameValues[i] = ""
@@ -22,15 +28,12 @@ end
 
 --==================================================
 -- WINDOW
--- Folder จำเป็นสำหรับ ConfigManager
 --==================================================
 
 local Window = WindUI:CreateWindow({
     Title = "nubnub",
-    Icon = "door-open",
+    Icon = "flame",
     Author = "by nubnub",
-
-    -- Config จะถูกเก็บใน Folder นี้
     Folder = "nubnub"
 })
 
@@ -49,8 +52,12 @@ if ConfigManager then
     end)
 end
 
--- เซฟ Config อัตโนมัติ
+--==================================================
+-- SAVE CONFIG
+--==================================================
+
 local function saveConfig()
+
     if not configLoaded then
         return
     end
@@ -60,6 +67,7 @@ local function saveConfig()
             Config:Save()
         end)
     end
+
 end
 
 --==================================================
@@ -72,13 +80,15 @@ local Tab = Window:Tab({
 })
 
 --==================================================
--- AUTO LEAVE
+-- AUTO CHANGE SERVER
 --==================================================
 
-local AutoLeaveToggle
+local AutoChangeServerToggle
 
 AutoChangeServerToggle = Tab:Toggle({
+
     Title = "Auto Change Server",
+
     Desc = "Change server when target player is found",
 
     Flag = "AutoChangeServer",
@@ -86,21 +96,26 @@ AutoChangeServerToggle = Tab:Toggle({
     Value = true,
 
     Callback = function(value)
+
         enabled = value
 
         saveConfig()
 
-        -- ถ้าเปิด Auto Leave กลับมา
-        -- ให้ตรวจ Server ทันที
+        -- ถ้าเปิดกลับมา ให้ตรวจทันที
         if value and configLoaded then
+
             task.spawn(function()
+
                 task.wait(0.1)
 
                 if _G.NubNubCheckServer then
                     _G.NubNubCheckServer()
                 end
+
             end)
+
         end
+
     end
 })
 
@@ -113,9 +128,13 @@ Tab:Section({
 })
 
 Tab:Paragraph({
+
     Title = "Target Players",
-    Desc = "Enter username only. @ is optional.\nYou can save up to "
-        .. MAX_USERS .. " players."
+
+    Desc =
+        "Enter username only. @ is optional.\n" ..
+        "You can save up to " .. MAX_USERS .. " players."
+
 })
 
 local UsernameInputs = {}
@@ -123,6 +142,7 @@ local UsernameInputs = {}
 for i = 1, MAX_USERS do
 
     UsernameInputs[i] = Tab:Input({
+
         Title = "Username " .. i,
 
         Flag = "Username_" .. i,
@@ -135,22 +155,24 @@ for i = 1, MAX_USERS do
 
             value = tostring(value or "")
 
-            -- เอา @ ออก
+            -- ลบ @
             value = value:gsub("@", "")
 
-            -- เอาช่องว่างออก
+            -- ลบช่องว่าง
             value = value:gsub("%s+", "")
 
             usernameValues[i] = value
 
             saveConfig()
+
         end
+
     })
 
 end
 
 --==================================================
--- USERNAME CHECK
+-- CLEAN USERNAME
 --==================================================
 
 local function cleanUsername(name)
@@ -161,32 +183,210 @@ local function cleanUsername(name)
 
     name = tostring(name)
 
-    -- ลบ @
     name = name:gsub("@", "")
-
-    -- ลบช่องว่าง
     name = name:gsub("%s+", "")
 
-    -- เปลี่ยนเป็นตัวเล็กทั้งหมด
     return string.lower(name)
+
 end
+
+--==================================================
+-- CHECK BLACKLIST
+--==================================================
 
 local function isBlacklisted(username)
 
     local targetName = cleanUsername(username)
 
+    if targetName == "" then
+        return false
+    end
+
     for i = 1, MAX_USERS do
 
-        local savedName = cleanUsername(usernameValues[i])
+        local savedName =
+            cleanUsername(usernameValues[i])
 
-        if savedName ~= "" and savedName == targetName then
+        if savedName ~= ""
+            and savedName == targetName then
+
             return true
+
         end
 
     end
 
     return false
+
 end
+
+--==================================================
+-- WEBHOOK
+--==================================================
+
+Tab:Section({
+    Title = "Webhook"
+})
+
+local WebhookInput
+
+WebhookInput = Tab:Input({
+
+    Title = "Discord Webhook",
+
+    Desc = "Paste your Discord Webhook URL",
+
+    Placeholder =
+        "https://discord.com/api/webhooks/...",
+
+    InputIcon = "webhook",
+
+    Flag = "WebhookURL",
+
+    Value = "",
+
+    Callback = function(value)
+
+        WebhookURL = tostring(value or "")
+
+        saveConfig()
+
+    end
+
+})
+
+--==================================================
+-- REQUEST FUNCTION
+--==================================================
+
+local function getRequestFunction()
+
+    return request
+        or http_request
+        or (syn and syn.request)
+
+end
+
+--==================================================
+-- SEND WEBHOOK
+--==================================================
+
+local function sendWebhook(message)
+
+    if WebhookURL == "" then
+        return false
+    end
+
+    local requestFunc =
+        getRequestFunction()
+
+    if not requestFunc then
+        return false
+    end
+
+    local success = pcall(function()
+
+        requestFunc({
+
+            Url = WebhookURL,
+
+            Method = "POST",
+
+            Headers = {
+                ["Content-Type"] =
+                    "application/json"
+            },
+
+            Body = HttpService:JSONEncode({
+
+                content = message
+
+            })
+
+        })
+
+    end)
+
+    return success
+
+end
+
+--==================================================
+-- TEST WEBHOOK
+--==================================================
+
+Tab:Button({
+
+    Title = "Test Webhook",
+
+    Icon = "send",
+
+    Callback = function()
+
+        if WebhookURL == "" then
+
+            WindUI:Notify({
+
+                Title = "Webhook",
+
+                Content =
+                    "Please enter Webhook URL first.",
+
+                Icon = "triangle-alert",
+
+                Duration = 3
+
+            })
+
+            return
+
+        end
+
+        task.spawn(function()
+
+            local success =
+                sendWebhook(
+                    "✅ **Webhook Test**\n" ..
+                    "Webhook ทำงานเรียบร้อย!"
+                )
+
+            if success then
+
+                WindUI:Notify({
+
+                    Title = "Webhook",
+
+                    Content =
+                        "Test Webhook sent.",
+
+                    Icon = "check",
+
+                    Duration = 3
+
+                })
+
+            else
+
+                WindUI:Notify({
+
+                    Title = "Webhook",
+
+                    Content =
+                        "ส่ง Webhook ไม่สำเร็จ",
+
+                    Icon = "triangle-alert",
+
+                    Duration = 3
+
+                })
+
+            end
+
+        end)
+
+    end
+
+})
 
 --==================================================
 -- SERVER CHECK
@@ -204,65 +404,168 @@ local function checkServer()
         return
     end
 
-    for _, otherPlayer in ipairs(Players:GetPlayers()) do
+    for _, otherPlayer in ipairs(
+        Players:GetPlayers()
+    ) do
 
         if otherPlayer ~= player then
 
-            if isBlacklisted(otherPlayer.Name) then
+            if isBlacklisted(
+                otherPlayer.Name
+            ) then
 
                 teleporting = true
 
+                --==================================
+                -- NOTIFY
+                --==================================
+
                 WindUI:Notify({
+
                     Title = "Player Found",
-                    Content = otherPlayer.Name
-                        .. " is in blacklist.\nChanging server...",
+
+                    Content =
+                        otherPlayer.Name ..
+                        " is in blacklist.\n" ..
+                        "Changing server...",
+
                     Icon = "triangle-alert",
+
                     Duration = 3
+
                 })
 
-                task.wait(0.5)
+                --==================================
+                -- WEBHOOK
+                -- ส่งแยก ไม่ขวาง Teleport
+                --==================================
 
-                local success = pcall(function()
+                task.spawn(function()
 
-                    TeleportService:Teleport(
-                        game.PlaceId,
-                        player
-                    )
+                    pcall(function()
+
+                        sendWebhook(
+
+                            "⚠️ **Blacklisted Player Found**\n\n" ..
+
+                            "**Username:** " ..
+                            otherPlayer.Name ..
+
+                            "\n**Display Name:** " ..
+                            otherPlayer.DisplayName ..
+
+                            "\n**User ID:** " ..
+                            otherPlayer.UserId ..
+
+                            "\n**Place ID:** " ..
+                            game.PlaceId ..
+
+                            "\n**Job ID:** `" ..
+                            game.JobId ..
+                            "`"
+
+                        )
+
+                    end)
 
                 end)
 
-                if not success then
-                    teleporting = false
-                end
+                --==================================
+                -- TELEPORT
+                --==================================
+
+                task.spawn(function()
+
+                    local success =
+                        pcall(function()
+
+                            TeleportService:Teleport(
+                                game.PlaceId,
+                                player
+                            )
+
+                        end)
+
+                    if not success then
+
+                        teleporting = false
+
+                        WindUI:Notify({
+
+                            Title = "Teleport Failed",
+
+                            Content =
+                                "Could not change server.",
+
+                            Icon = "triangle-alert",
+
+                            Duration = 3
+
+                        })
+
+                    end
+
+                end)
 
                 return
+
             end
 
         end
+
     end
+
 end
 
--- ให้ Toggle เรียกได้
+--==================================================
+-- GLOBAL CHECK
+--==================================================
+
 _G.NubNubCheckServer = checkServer
 
 --==================================================
--- BUTTON
+-- TELEPORT FAILED
+--==================================================
+
+TeleportService.TeleportInitFailed:Connect(
+    function()
+
+        teleporting = false
+
+        task.wait(1)
+
+        if enabled then
+            checkServer()
+        end
+
+    end
+)
+
+--==================================================
+-- CHECK SERVER BUTTON
 --==================================================
 
 Tab:Button({
+
     Title = "Check Server",
+
     Icon = "search",
 
     Callback = function()
 
         local found = false
 
-        for _, otherPlayer in ipairs(Players:GetPlayers()) do
+        for _, otherPlayer in ipairs(
+            Players:GetPlayers()
+        ) do
 
             if otherPlayer ~= player
-                and isBlacklisted(otherPlayer.Name) then
+                and isBlacklisted(
+                    otherPlayer.Name
+                ) then
 
                 found = true
+
                 break
 
             end
@@ -272,30 +575,39 @@ Tab:Button({
         if not found then
 
             WindUI:Notify({
+
                 Title = "Server Safe",
-                Content = "No blacklisted player found.",
+
+                Content =
+                    "No blacklisted player found.",
+
                 Icon = "check",
+
                 Duration = 3
+
             })
 
         end
 
         checkServer()
+
     end
+
 })
 
 --==================================================
--- CONFIG LOAD
+-- CONFIG REGISTER
 --==================================================
 
 if Config then
 
-    -- Register ทุก Element
+    -- Auto Change Server
     Config:Register(
         "AutoChangeServer",
         AutoChangeServerToggle
     )
 
+    -- Username 1-15
     for i = 1, MAX_USERS do
 
         Config:Register(
@@ -305,24 +617,43 @@ if Config then
 
     end
 
-    -- โหลด Config เก่า
+    -- Webhook
+    Config:Register(
+        "WebhookURL",
+        WebhookInput
+    )
+
+    -- Load Config
     pcall(function()
         Config:Load()
     end)
 
 end
 
--- รอให้ WindUI ใส่ค่าที่โหลดกลับเข้า Input
+--==================================================
+-- WAIT FOR CONFIG
+--==================================================
+
 task.wait(1)
 
 configLoaded = true
 
--- อ่านค่าปัจจุบันหลัง Load
-enabled = AutoChangeServerToggle.Value
+--==================================================
+-- READ LOADED VALUES
+--==================================================
 
+if AutoChangeServerToggle then
+
+    enabled =
+        AutoChangeServerToggle.Value
+
+end
+
+-- Username
 for i = 1, MAX_USERS do
 
-    local input = UsernameInputs[i]
+    local input =
+        UsernameInputs[i]
 
     if input and input.Value then
 
@@ -333,25 +664,41 @@ for i = 1, MAX_USERS do
 
 end
 
--- เซฟหลังโหลด
+-- Webhook
+if WebhookInput
+    and WebhookInput.Value then
+
+    WebhookURL =
+        tostring(
+            WebhookInput.Value or ""
+        )
+
+end
+
+--==================================================
+-- SAVE CONFIG
+--==================================================
+
 saveConfig()
 
 --==================================================
--- CHECK SERVER WHEN SCRIPT STARTS
+-- CHECK SERVER ON START
 --==================================================
 
 checkServer()
 
 --==================================================
--- CHECK WHEN NEW PLAYER JOINS
+-- CHECK WHEN PLAYER JOINS
 --==================================================
 
-Players.PlayerAdded:Connect(function(newPlayer)
+Players.PlayerAdded:Connect(
+    function(newPlayer)
 
-    task.wait(1)
+        task.wait(1)
 
-    if enabled then
-        checkServer()
+        if enabled then
+            checkServer()
+        end
+
     end
-
-end)
+)
