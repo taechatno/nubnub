@@ -19,6 +19,7 @@ local player = Players.LocalPlayer
 local MAX_USERS = 15
 
 local TELEPORT_COOLDOWN = 3
+local TELEPORT_TIMEOUT = 15
 local MAX_RETRY = 20
 
 -- Webhook Colors
@@ -36,6 +37,12 @@ local WebhookURL = ""
 local teleporting = false
 local retryCount = 0
 local configLoaded = false
+
+-- เก็บ Job ID ก่อนเริ่มย้าย
+local originalJobId = game.JobId
+
+-- ป้องกันการส่ง Attempt ซ้ำ
+local lastAttemptSent = 0
 
 for i = 1, MAX_USERS do
     usernameValues[i] = ""
@@ -314,6 +321,7 @@ local function sendWebhook(title, description, color)
     end)
 
     return success
+
 end
 
 --==================================================
@@ -416,30 +424,10 @@ Tab:Button({
 })
 
 --==================================================
--- SEND SUCCESS AFTER TELEPORT
+-- TELEPORT SUCCESS
 --==================================================
 
-local function checkTeleportData()
-
-    local teleportData
-
-    pcall(function()
-        teleportData =
-            TeleportService:GetLocalPlayerTeleportData()
-    end)
-
-    if not teleportData then
-        return
-    end
-
-    if teleportData.NubNubTeleport ~= true then
-        return
-    end
-
-    local attempt =
-        tonumber(teleportData.Attempt) or 1
-
-    task.wait(1)
+local function sendTeleportSuccess(attempt)
 
     sendWebhook(
         "🟢 Server Change Successful",
@@ -470,20 +458,269 @@ local function checkTeleportData()
         SUCCESS_COLOR
     )
 
+end
+
+--==================================================
+-- TELEPORT FAILURE
+--==================================================
+
+local function teleportFailed(reason)
+
+    if not teleporting then
+        return
+    end
+
+    teleporting = false
+
+    if retryCount >= MAX_RETRY then
+
+        sendWebhook(
+            "🔴 Server Change Failed",
+
+            "ไม่สามารถย้ายเซิร์ฟได้" ..
+
+            "\n**Reason:** " ..
+            tostring(reason or "Unknown") ..
+
+            "\n**Attempts:** " ..
+            retryCount ..
+            "/" ..
+            MAX_RETRY ..
+
+            "\n**Place ID:** " ..
+            game.PlaceId ..
+
+            "\n**Job ID:** `" ..
+            game.JobId ..
+            "`",
+
+            FAILED_COLOR
+        )
+
+        WindUI:Notify({
+            Title = "Server Change Failed",
+            Content =
+                "Failed after " ..
+                retryCount ..
+                "/" ..
+                MAX_RETRY ..
+                " attempts.",
+
+            Icon = "x",
+            Duration = 5
+        })
+
+        return
+    end
+
+    task.wait(TELEPORT_COOLDOWN)
+
+    if enabled then
+        _G.NubNubStartTeleport()
+    end
+
+end
+
+--==================================================
+-- START TELEPORT
+--==================================================
+
+local function startTeleport()
+
+    if not enabled then
+        return
+    end
+
+    if teleporting then
+        return
+    end
+
+    if retryCount >= MAX_RETRY then
+
+        sendWebhook(
+            "🔴 Server Change Failed",
+
+            "ถึงจำนวน Retry สูงสุดแล้ว" ..
+
+            "\n**Attempts:** " ..
+            retryCount ..
+            "/" ..
+            MAX_RETRY ..
+
+            "\n**Place ID:** " ..
+            game.PlaceId ..
+
+            "\n**Job ID:** `" ..
+            game.JobId ..
+            "`",
+
+            FAILED_COLOR
+        )
+
+        return
+    end
+
+    teleporting = true
+
+    retryCount += 1
+
+    local currentAttempt = retryCount
+    local jobBeforeTeleport = game.JobId
+
+    --==============================================
+    -- WEBHOOK ATTEMPT
+    --==============================================
+
+    if lastAttemptSent ~= currentAttempt then
+
+        lastAttemptSent = currentAttempt
+
+        task.spawn(function()
+
+            sendWebhook(
+                "🔵 Server Change Attempt",
+
+                "**Attempt:** " ..
+                currentAttempt ..
+                "/" ..
+                MAX_RETRY ..
+
+                "\n**Place ID:** " ..
+                game.PlaceId ..
+
+                "\n**Old Job ID:** `" ..
+                jobBeforeTeleport ..
+                "`" ..
+
+                "\n**Status:** Attempting server change...",
+
+                ATTEMPT_COLOR
+            )
+
+        end)
+
+    end
+
+    --==============================================
+    -- UI
+    --==============================================
+
     WindUI:Notify({
-        Title = "Server Changed",
+        Title = "Changing Server",
         Content =
-            "Server change successful.\n" ..
             "Attempt " ..
-            attempt ..
+            currentAttempt ..
             "/" ..
             MAX_RETRY,
 
-        Icon = "check",
-        Duration = 4
+        Icon = "refresh-cw",
+        Duration = 3
     })
 
+    --==============================================
+    -- TELEPORT
+    --==============================================
+
+    local teleportCalled = false
+
+    local success, errorMessage = pcall(function()
+
+        -- ใช้ Teleport ฝั่ง Client
+        -- แทน TeleportAsync ที่อาจไม่ทำงานใน Client
+
+        TeleportService:Teleport(
+            game.PlaceId,
+            player
+        )
+
+        teleportCalled = true
+
+    end)
+
+    if not success then
+
+        teleportFailed(
+            "Teleport error: " ..
+            tostring(errorMessage)
+        )
+
+        return
+
+    end
+
+    if not teleportCalled then
+
+        teleportFailed(
+            "Teleport was not called"
+        )
+
+        return
+
+    end
+
+    --==============================================
+    -- TIMEOUT CHECK
+    --==============================================
+
+    task.spawn(function()
+
+        local startTime = os.clock()
+
+        while teleporting
+            and os.clock() - startTime < TELEPORT_TIMEOUT do
+
+            task.wait(1)
+
+            -- ถ้า Job ID เปลี่ยน
+            -- แปลว่าย้ายเซิร์ฟสำเร็จแล้ว
+
+            if game.JobId ~= jobBeforeTeleport
+                and game.JobId ~= "" then
+
+                teleporting = false
+
+                sendTeleportSuccess(
+                    currentAttempt
+                )
+
+                WindUI:Notify({
+                    Title = "Server Changed",
+                    Content =
+                        "Server change successful.\n" ..
+                        "Attempt " ..
+                        currentAttempt ..
+                        "/" ..
+                        MAX_RETRY,
+
+                    Icon = "check",
+                    Duration = 4
+                })
+
+                return
+
+            end
+
+        end
+
+        --==========================================
+        -- TIMEOUT
+        --==========================================
+
+        if teleporting then
+
+            teleportFailed(
+                "Teleport timeout (" ..
+                TELEPORT_TIMEOUT ..
+                " seconds)"
+            )
+
+        end
+
+    end)
+
 end
+
+_G.NubNubStartTeleport = startTeleport
 
 --==================================================
 -- SERVER CHECK
@@ -506,12 +743,9 @@ local function checkServer()
         if otherPlayer ~= player
             and isBlacklisted(otherPlayer.Name) then
 
-            teleporting = true
-            retryCount = 0
-
-            --========================================
-            -- 🟡 BLACKLIST FOUND
-            --========================================
+            --======================================
+            -- BLACKLIST FOUND
+            --======================================
 
             task.spawn(function()
 
@@ -544,120 +778,23 @@ local function checkServer()
                 Content =
                     otherPlayer.Name ..
                     " is in blacklist.\nChanging server...",
+
                 Icon = "triangle-alert",
                 Duration = 3
             })
 
-            --========================================
-            -- TELEPORT
-            --========================================
+            --======================================
+            -- START TELEPORT
+            --======================================
 
             task.spawn(function()
 
                 task.wait(TELEPORT_COOLDOWN)
 
-                if not enabled then
-                    teleporting = false
-                    return
-                end
+                if enabled
+                    and not teleporting then
 
-                retryCount += 1
-
-                --====================================
-                -- 🔵 ATTEMPT
-                --====================================
-
-                task.spawn(function()
-
-                    sendWebhook(
-                        "🔵 Server Change Attempt",
-
-                        "**Attempt:** " ..
-                        retryCount ..
-                        "/" ..
-                        MAX_RETRY ..
-
-                        "\n**Place ID:** " ..
-                        game.PlaceId ..
-
-                        "\n**Job ID:** `" ..
-                        game.JobId ..
-                        "`" ..
-
-                        "\n**Status:** Attempting server change...",
-
-                        ATTEMPT_COLOR
-                    )
-
-                end)
-
-                --====================================
-                -- TELEPORT OPTIONS
-                --====================================
-
-                local teleportOptions =
-                    Instance.new("TeleportOptions")
-
-                teleportOptions:SetTeleportData({
-                    NubNubTeleport = true,
-                    Attempt = retryCount
-                })
-
-                --====================================
-                -- TELEPORT
-                --====================================
-
-                local success = pcall(function()
-
-                    TeleportService:TeleportAsync(
-                        game.PlaceId,
-                        {player},
-                        teleportOptions
-                    )
-
-                end)
-
-                if not success then
-
-                    teleporting = false
-
-                    if retryCount >= MAX_RETRY then
-
-                        task.spawn(function()
-
-                            sendWebhook(
-                                "🔴 Server Change Failed",
-
-                                "ไม่สามารถย้ายเซิร์ฟได้" ..
-
-                                "\n**Attempts:** " ..
-                                retryCount ..
-                                "/" ..
-                                MAX_RETRY ..
-
-                                "\n**Place ID:** " ..
-                                game.PlaceId ..
-
-                                "\n**Job ID:** `" ..
-                                game.JobId ..
-                                "`",
-
-                                FAILED_COLOR
-                            )
-
-                        end)
-
-                    else
-
-                        task.wait(
-                            TELEPORT_COOLDOWN
-                        )
-
-                        if enabled then
-                            checkServer()
-                        end
-
-                    end
+                    startTeleport()
 
                 end
 
@@ -678,97 +815,38 @@ end
 _G.NubNubCheckServer = checkServer
 
 --==================================================
--- TELEPORT FAILED
+-- TELEPORT INIT FAILED
 --==================================================
 
 TeleportService.TeleportInitFailed:Connect(
-    function()
+    function(
+        failedPlayer,
+        teleportResult,
+        errorMessage
+    )
 
-        teleporting = false
-
-        if retryCount >= MAX_RETRY then
-
-            task.spawn(function()
-
-                sendWebhook(
-                    "🔴 Server Change Failed",
-
-                    "Teleport ถูกปฏิเสธหรือไม่สำเร็จ" ..
-
-                    "\n**Attempts:** " ..
-                    retryCount ..
-                    "/" ..
-                    MAX_RETRY ..
-
-                    "\n**Place ID:** " ..
-                    game.PlaceId ..
-
-                    "\n**Job ID:** `" ..
-                    game.JobId ..
-                    "`",
-
-                    FAILED_COLOR
-                )
-
-            end)
+        -- สนใจเฉพาะ LocalPlayer
+        if failedPlayer
+            and failedPlayer ~= player then
 
             return
 
         end
 
-        task.wait(
-            TELEPORT_COOLDOWN
-        )
-
-        if enabled then
-            checkServer()
+        if not teleporting then
+            return
         end
+
+        local reason =
+            tostring(errorMessage or teleportResult or "Unknown")
+
+        teleportFailed(
+            "TeleportInitFailed: " ..
+            reason
+        )
 
     end
 )
-
---==================================================
--- CHECK SERVER BUTTON
---==================================================
-
-Tab:Button({
-    Title = "Check Server",
-    Icon = "search",
-
-    Callback = function()
-
-        local found = false
-
-        for _, otherPlayer in ipairs(
-            Players:GetPlayers()
-        ) do
-
-            if otherPlayer ~= player
-                and isBlacklisted(otherPlayer.Name) then
-
-                found = true
-                break
-
-            end
-
-        end
-
-        if not found then
-
-            WindUI:Notify({
-                Title = "Server Safe",
-                Content =
-                    "No blacklisted player found.",
-                Icon = "check",
-                Duration = 3
-            })
-
-        end
-
-        checkServer()
-
-    end
-})
 
 --==================================================
 -- CONFIG REGISTER
@@ -862,13 +940,24 @@ task.spawn(function()
 
     task.wait(2)
 
-    checkTeleportData()
+    -- ถ้าเราเข้ามาเซิร์ฟใหม่
+    -- และ Job ID เปลี่ยนจากตอนก่อน Teleport
+
+    if game.JobId ~= originalJobId
+        and game.JobId ~= "" then
+
+        -- ไม่ส่งซ้ำถ้าไม่มี teleport state
+        -- เพราะเซิร์ฟอาจถูกเข้าโดยปกติ
+
+    end
 
 end)
 
 --==================================================
 -- START CHECK
 --==================================================
+
+task.wait(0.5)
 
 checkServer()
 
@@ -881,8 +970,11 @@ Players.PlayerAdded:Connect(
 
         task.wait(1)
 
-        if enabled then
+        if enabled
+            and not teleporting then
+
             checkServer()
+
         end
 
     end
