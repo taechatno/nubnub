@@ -317,16 +317,23 @@ Tab:Button({
         task.spawn(function()
 
             local success = sendWebhook(
-                "🔵 Webhook Test",
-                "Webhook ทำงานเรียบร้อย!",
-                255
+                "🟢 Server Change Successful",
+
+                "**Username:** test_webhook" ..
+                "\n**Display Name:** Test Webhook" ..
+                "\n**User ID:** 123456789" ..
+                "\n**Place ID:** 987654321" ..
+                "\n**Job ID:** `test-job-id-123456`" ..
+                "\n**Status:** Server change successful",
+
+                65280
             )
 
             if success then
 
                 WindUI:Notify({
                     Title = "Webhook",
-                    Content = "Test Webhook sent.",
+                    Content = "Test successful webhook sent.",
                     Icon = "check",
                     Duration = 3
                 })
@@ -343,55 +350,6 @@ Tab:Button({
             end
 
         end)
-    end
-})
-
---==================================================
--- TEST SERVER CHECK
---==================================================
-
-Tab:Button({
-    Title = "Test Server Check",
-    Icon = "scan-search",
-
-    Callback = function()
-
-        local foundPlayer = nil
-
-        for _, otherPlayer in ipairs(
-            Players:GetPlayers()
-        ) do
-
-            if otherPlayer ~= player
-                and isBlacklisted(otherPlayer.Name) then
-
-                foundPlayer = otherPlayer
-                break
-            end
-        end
-
-        if foundPlayer then
-
-            WindUI:Notify({
-                Title = "Blacklist Found",
-                Content =
-                    foundPlayer.Name ..
-                    " is in your blacklist.",
-                Icon = "triangle-alert",
-                Duration = 4
-            })
-
-        else
-
-            WindUI:Notify({
-                Title = "Server Safe",
-                Content =
-                    "No blacklisted player found.",
-                Icon = "check",
-                Duration = 4
-            })
-
-        end
     end
 })
 
