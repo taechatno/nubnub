@@ -18,12 +18,18 @@ local player = Players.LocalPlayer
 
 local MAX_USERS = 15
 
--- ข้อ 2: Cooldown / Retry
 local TELEPORT_COOLDOWN = 3
 local MAX_RETRY = 20
 
+-- Webhook Colors
+local ATTEMPT_COLOR = 3447003
+local SUCCESS_COLOR = 65280
+local FOUND_COLOR = 16776960
+local FAILED_COLOR = 16711680
+
 local enabled = true
 local webhookEnabled = true
+
 local usernameValues = {}
 local WebhookURL = ""
 
@@ -73,7 +79,7 @@ local function saveConfig()
 end
 
 --==================================================
--- TAB
+-- SERVER TAB
 --==================================================
 
 local Tab = Window:Tab({
@@ -82,8 +88,12 @@ local Tab = Window:Tab({
 })
 
 --==================================================
--- AUTO CHANGE SERVER
+-- CHANGE SERVER
 --==================================================
+
+Tab:Section({
+    Title = "Change Server"
+})
 
 local AutoChangeServerToggle
 
@@ -143,6 +153,7 @@ for i = 1, MAX_USERS do
             usernameValues[i] = value
 
             saveConfig()
+
         end
     })
 
@@ -163,6 +174,7 @@ local function cleanUsername(name)
     name = name:gsub("%s+", "")
 
     return string.lower(name)
+
 end
 
 --==================================================
@@ -186,38 +198,47 @@ local function isBlacklisted(username)
             and savedName == targetName then
 
             return true
+
         end
+
     end
 
     return false
+
 end
 
 --==================================================
--- WEBHOOK
+-- WEBHOOK TAB
 --==================================================
 
-Tab:Section({
-    Title = "Webhook"
+local WebhookTab = Window:Tab({
+    Title = "Webhook",
+    Icon = "webhook"
 })
 
--- ข้อ 4: เปิด/ปิด Webhook
+--==================================================
+-- WEBHOOK SETTINGS
+--==================================================
+
 local WebhookToggle
 
-WebhookToggle = Tab:Toggle({
+WebhookToggle = WebhookTab:Toggle({
     Title = "Webhook Notification",
     Desc = "Enable Discord notifications",
     Flag = "WebhookEnabled",
     Value = true,
 
     Callback = function(value)
+
         webhookEnabled = value
         saveConfig()
+
     end
 })
 
 local WebhookInput
 
-WebhookInput = Tab:Input({
+WebhookInput = WebhookTab:Input({
     Title = "Discord Webhook",
     Desc = "Paste your Discord Webhook URL",
     Placeholder = "https://discord.com/api/webhooks/...",
@@ -226,8 +247,10 @@ WebhookInput = Tab:Input({
     Value = "",
 
     Callback = function(value)
+
         WebhookURL = tostring(value or "")
         saveConfig()
+
     end
 })
 
@@ -279,6 +302,7 @@ local function sendWebhook(title, description, color)
                         title = title,
                         description = description,
                         color = color,
+
                         footer = {
                             text = "nubnub"
                         }
@@ -296,7 +320,7 @@ end
 -- TEST WEBHOOK
 --==================================================
 
-Tab:Button({
+WebhookTab:Button({
     Title = "Test Webhook",
     Icon = "send",
 
@@ -322,11 +346,12 @@ Tab:Button({
                 "**Username:** test_webhook" ..
                 "\n**Display Name:** Test Webhook" ..
                 "\n**User ID:** 123456789" ..
+                "\n**Attempt:** 1/20" ..
                 "\n**Place ID:** 987654321" ..
                 "\n**Job ID:** `test-job-id-123456`" ..
                 "\n**Status:** Server change successful",
 
-                65280
+                SUCCESS_COLOR
             )
 
             if success then
@@ -350,6 +375,7 @@ Tab:Button({
             end
 
         end)
+
     end
 })
 
@@ -388,6 +414,76 @@ Tab:Button({
 
     end
 })
+
+--==================================================
+-- SEND SUCCESS AFTER TELEPORT
+--==================================================
+
+local function checkTeleportData()
+
+    local teleportData
+
+    pcall(function()
+        teleportData =
+            TeleportService:GetLocalPlayerTeleportData()
+    end)
+
+    if not teleportData then
+        return
+    end
+
+    if teleportData.NubNubTeleport ~= true then
+        return
+    end
+
+    local attempt =
+        tonumber(teleportData.Attempt) or 1
+
+    task.wait(1)
+
+    sendWebhook(
+        "🟢 Server Change Successful",
+
+        "**Username:** " ..
+        player.Name ..
+
+        "\n**Display Name:** " ..
+        player.DisplayName ..
+
+        "\n**User ID:** " ..
+        player.UserId ..
+
+        "\n**Attempt:** " ..
+        attempt ..
+        "/" ..
+        MAX_RETRY ..
+
+        "\n**Place ID:** " ..
+        game.PlaceId ..
+
+        "\n**New Job ID:** `" ..
+        game.JobId ..
+        "`" ..
+
+        "\n**Status:** Server change successful",
+
+        SUCCESS_COLOR
+    )
+
+    WindUI:Notify({
+        Title = "Server Changed",
+        Content =
+            "Server change successful.\n" ..
+            "Attempt " ..
+            attempt ..
+            "/" ..
+            MAX_RETRY,
+
+        Icon = "check",
+        Duration = 4
+    })
+
+end
 
 --==================================================
 -- SERVER CHECK
@@ -438,7 +534,7 @@ local function checkServer()
                     game.JobId ..
                     "`",
 
-                    16776960
+                    FOUND_COLOR
                 )
 
             end)
@@ -460,33 +556,72 @@ local function checkServer()
 
                 task.wait(TELEPORT_COOLDOWN)
 
+                if not enabled then
+                    teleporting = false
+                    return
+                end
+
+                retryCount += 1
+
+                --====================================
+                -- 🔵 ATTEMPT
+                --====================================
+
+                task.spawn(function()
+
+                    sendWebhook(
+                        "🔵 Server Change Attempt",
+
+                        "**Attempt:** " ..
+                        retryCount ..
+                        "/" ..
+                        MAX_RETRY ..
+
+                        "\n**Place ID:** " ..
+                        game.PlaceId ..
+
+                        "\n**Job ID:** `" ..
+                        game.JobId ..
+                        "`" ..
+
+                        "\n**Status:** Attempting server change...",
+
+                        ATTEMPT_COLOR
+                    )
+
+                end)
+
+                --====================================
+                -- TELEPORT OPTIONS
+                --====================================
+
+                local teleportOptions =
+                    Instance.new("TeleportOptions")
+
+                teleportOptions:SetTeleportData({
+                    NubNubTeleport = true,
+                    Attempt = retryCount
+                })
+
+                --====================================
+                -- TELEPORT
+                --====================================
+
                 local success = pcall(function()
 
-                    TeleportService:Teleport(
+                    TeleportService:TeleportAsync(
                         game.PlaceId,
-                        player
+                        {player},
+                        teleportOptions
                     )
 
                 end)
 
                 if not success then
 
-                    retryCount += 1
-
                     teleporting = false
 
-                    -- 🔴 Retry
-                    if retryCount < MAX_RETRY then
-
-                        task.wait(
-                            TELEPORT_COOLDOWN
-                        )
-
-                        if enabled then
-                            checkServer()
-                        end
-
-                    else
+                    if retryCount >= MAX_RETRY then
 
                         task.spawn(function()
 
@@ -496,24 +631,44 @@ local function checkServer()
                                 "ไม่สามารถย้ายเซิร์ฟได้" ..
 
                                 "\n**Attempts:** " ..
+                                retryCount ..
+                                "/" ..
                                 MAX_RETRY ..
 
                                 "\n**Place ID:** " ..
-                                game.PlaceId,
+                                game.PlaceId ..
 
-                                16711680
+                                "\n**Job ID:** `" ..
+                                game.JobId ..
+                                "`",
+
+                                FAILED_COLOR
                             )
 
                         end)
 
+                    else
+
+                        task.wait(
+                            TELEPORT_COOLDOWN
+                        )
+
+                        if enabled then
+                            checkServer()
+                        end
+
                     end
+
                 end
 
             end)
 
             return
+
         end
+
     end
+
 end
 
 --==================================================
@@ -530,19 +685,8 @@ TeleportService.TeleportInitFailed:Connect(
     function()
 
         teleporting = false
-        retryCount += 1
 
-        if retryCount < MAX_RETRY then
-
-            task.wait(
-                TELEPORT_COOLDOWN
-            )
-
-            if enabled then
-                checkServer()
-            end
-
-        else
+        if retryCount >= MAX_RETRY then
 
             task.spawn(function()
 
@@ -552,16 +696,32 @@ TeleportService.TeleportInitFailed:Connect(
                     "Teleport ถูกปฏิเสธหรือไม่สำเร็จ" ..
 
                     "\n**Attempts:** " ..
+                    retryCount ..
+                    "/" ..
                     MAX_RETRY ..
 
                     "\n**Place ID:** " ..
-                    game.PlaceId,
+                    game.PlaceId ..
 
-                    16711680
+                    "\n**Job ID:** `" ..
+                    game.JobId ..
+                    "`",
+
+                    FAILED_COLOR
                 )
 
             end)
 
+            return
+
+        end
+
+        task.wait(
+            TELEPORT_COOLDOWN
+        )
+
+        if enabled then
+            checkServer()
         end
 
     end
@@ -588,6 +748,7 @@ Tab:Button({
 
                 found = true
                 break
+
             end
 
         end
@@ -605,6 +766,7 @@ Tab:Button({
         end
 
         checkServer()
+
     end
 })
 
@@ -691,6 +853,18 @@ if WebhookInput
 end
 
 saveConfig()
+
+--==================================================
+-- CHECK TELEPORT SUCCESS
+--==================================================
+
+task.spawn(function()
+
+    task.wait(2)
+
+    checkTeleportData()
+
+end)
 
 --==================================================
 -- START CHECK
