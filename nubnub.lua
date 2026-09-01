@@ -20,6 +20,7 @@ local MAX_USERS = 15
 
 local TELEPORT_COOLDOWN = 3
 local TELEPORT_TIMEOUT = 15
+local SERVER_FETCH_LIMIT = 100
 local MAX_RETRY = 20
 
 -- Webhook Colors
@@ -34,18 +35,40 @@ local webhookEnabled = true
 local usernameValues = {}
 local WebhookURL = ""
 
+--==================================================
+-- TELEPORT STATE
+--==================================================
+
 local teleporting = false
 local retryCount = 0
 local configLoaded = false
 
--- เก็บ Job ID ก่อนเริ่มย้าย
-local originalJobId = game.JobId
+local teleportData = nil
+local arrivingFromTeleport = false
 
--- ป้องกันการส่ง Attempt ซ้ำ
+local lastFoundUsername = nil
 local lastAttemptSent = 0
+local lastSuccessJob = nil
 
-for i = 1, MAX_USERS do
-    usernameValues[i] = ""
+--==================================================
+-- INIT TELEPORT DATA
+--==================================================
+
+pcall(function()
+
+    teleportData =
+        TeleportService:GetLocalPlayerTeleportData()
+
+end)
+
+if type(teleportData) == "table"
+    and teleportData.NubNubTeleport == true then
+
+    arrivingFromTeleport = true
+
+    retryCount =
+        tonumber(teleportData.Attempt) or 1
+
 end
 
 --==================================================
@@ -67,22 +90,32 @@ local ConfigManager = Window.ConfigManager
 local Config = nil
 
 if ConfigManager then
+
     pcall(function()
+
         ConfigManager:Init(Window)
-        Config = ConfigManager:CreateConfig("AutoLeave")
+
+        Config =
+            ConfigManager:CreateConfig("AutoLeave")
+
     end)
+
 end
 
 local function saveConfig()
+
     if not configLoaded then
         return
     end
 
     if Config then
+
         pcall(function()
             Config:Save()
         end)
+
     end
+
 end
 
 --==================================================
@@ -111,18 +144,26 @@ AutoChangeServerToggle = Tab:Toggle({
     Value = true,
 
     Callback = function(value)
+
         enabled = value
+
         saveConfig()
 
-        if value and configLoaded then
+        if value
+            and configLoaded then
+
             task.spawn(function()
+
                 task.wait(0.1)
 
                 if _G.NubNubCheckServer then
                     _G.NubNubCheckServer()
                 end
+
             end)
+
         end
+
     end
 })
 
@@ -136,9 +177,12 @@ Tab:Section({
 
 Tab:Paragraph({
     Title = "Target Players",
+
     Desc =
         "Enter username only. @ is optional.\n" ..
-        "You can save up to " .. MAX_USERS .. " players."
+        "You can save up to " ..
+        MAX_USERS ..
+        " players."
 })
 
 local UsernameInputs = {}
@@ -146,22 +190,35 @@ local UsernameInputs = {}
 for i = 1, MAX_USERS do
 
     UsernameInputs[i] = Tab:Input({
+
         Title = "Username " .. i,
-        Flag = "Username_" .. i,
+
+        Flag =
+            "Username_" .. i,
+
         Value = "",
-        Placeholder = "Enter username...",
+
+        Placeholder =
+            "Enter username...",
 
         Callback = function(value)
 
-            value = tostring(value or "")
-            value = value:gsub("@", "")
-            value = value:gsub("%s+", "")
+            value =
+                tostring(value or "")
 
-            usernameValues[i] = value
+            value =
+                value:gsub("@", "")
+
+            value =
+                value:gsub("%s+", "")
+
+            usernameValues[i] =
+                value
 
             saveConfig()
 
         end
+
     })
 
 end
@@ -176,9 +233,14 @@ local function cleanUsername(name)
         return ""
     end
 
-    name = tostring(name)
-    name = name:gsub("@", "")
-    name = name:gsub("%s+", "")
+    name =
+        tostring(name)
+
+    name =
+        name:gsub("@", "")
+
+    name =
+        name:gsub("%s+", "")
 
     return string.lower(name)
 
@@ -190,7 +252,8 @@ end
 
 local function isBlacklisted(username)
 
-    local targetName = cleanUsername(username)
+    local targetName =
+        cleanUsername(username)
 
     if targetName == "" then
         return false
@@ -199,7 +262,9 @@ local function isBlacklisted(username)
     for i = 1, MAX_USERS do
 
         local savedName =
-            cleanUsername(usernameValues[i])
+            cleanUsername(
+                usernameValues[i]
+            )
 
         if savedName ~= ""
             and savedName == targetName then
@@ -211,6 +276,30 @@ local function isBlacklisted(username)
     end
 
     return false
+
+end
+
+--==================================================
+-- FIND BLACKLIST PLAYER
+--==================================================
+
+local function findBlacklistedPlayer()
+
+    for _, otherPlayer in
+        ipairs(Players:GetPlayers()) do
+
+        if otherPlayer ~= player
+            and isBlacklisted(
+                otherPlayer.Name
+            ) then
+
+            return otherPlayer
+
+        end
+
+    end
+
+    return nil
 
 end
 
@@ -230,14 +319,22 @@ local WebhookTab = Window:Tab({
 local WebhookToggle
 
 WebhookToggle = WebhookTab:Toggle({
+
     Title = "Webhook Notification",
-    Desc = "Enable Discord notifications",
-    Flag = "WebhookEnabled",
+
+    Desc =
+        "Enable Discord notifications",
+
+    Flag =
+        "WebhookEnabled",
+
     Value = true,
 
     Callback = function(value)
 
-        webhookEnabled = value
+        webhookEnabled =
+            value
+
         saveConfig()
 
     end
@@ -246,19 +343,32 @@ WebhookToggle = WebhookTab:Toggle({
 local WebhookInput
 
 WebhookInput = WebhookTab:Input({
+
     Title = "Discord Webhook",
-    Desc = "Paste your Discord Webhook URL",
-    Placeholder = "https://discord.com/api/webhooks/...",
-    InputIcon = "webhook",
-    Flag = "WebhookURL",
+
+    Desc =
+        "Paste your Discord Webhook URL",
+
+    Placeholder =
+        "https://discord.com/api/webhooks/...",
+
+    InputIcon =
+        "webhook",
+
+    Flag =
+        "WebhookURL",
+
     Value = "",
 
     Callback = function(value)
 
-        WebhookURL = tostring(value or "")
+        WebhookURL =
+            tostring(value or "")
+
         saveConfig()
 
     end
+
 })
 
 --==================================================
@@ -274,10 +384,14 @@ local function getRequestFunction()
 end
 
 --==================================================
--- EMBED WEBHOOK
+-- WEBHOOK
 --==================================================
 
-local function sendWebhook(title, description, color)
+local function sendWebhook(
+    title,
+    description,
+    color
+)
 
     if not webhookEnabled then
         return false
@@ -287,38 +401,61 @@ local function sendWebhook(title, description, color)
         return false
     end
 
-    local requestFunc = getRequestFunction()
+    local requestFunc =
+        getRequestFunction()
 
     if not requestFunc then
         return false
     end
 
-    local success = pcall(function()
+    local success =
+        pcall(function()
 
-        requestFunc({
-            Url = WebhookURL,
-            Method = "POST",
+            requestFunc({
 
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
+                Url =
+                    WebhookURL,
 
-            Body = HttpService:JSONEncode({
-                embeds = {
-                    {
-                        title = title,
-                        description = description,
-                        color = color,
+                Method =
+                    "POST",
 
-                        footer = {
-                            text = "nubnub"
+                Headers = {
+                    ["Content-Type"] =
+                        "application/json"
+                },
+
+                Body =
+                    HttpService:JSONEncode({
+
+                        embeds = {
+
+                            {
+
+                                title =
+                                    title,
+
+                                description =
+                                    description,
+
+                                color =
+                                    color,
+
+                                footer = {
+
+                                    text =
+                                        "nubnub"
+
+                                }
+
+                            }
+
                         }
-                    }
-                }
-            })
-        })
 
-    end)
+                    })
+
+            })
+
+        end)
 
     return success
 
@@ -329,7 +466,9 @@ end
 --==================================================
 
 WebhookTab:Button({
+
     Title = "Test Webhook",
+
     Icon = "send",
 
     Callback = function()
@@ -337,47 +476,81 @@ WebhookTab:Button({
         if WebhookURL == "" then
 
             WindUI:Notify({
-                Title = "Webhook",
-                Content = "Please enter Webhook URL first.",
-                Icon = "triangle-alert",
+
+                Title =
+                    "Webhook",
+
+                Content =
+                    "Please enter Webhook URL first.",
+
+                Icon =
+                    "triangle-alert",
+
                 Duration = 3
+
             })
 
             return
+
         end
 
         task.spawn(function()
 
-            local success = sendWebhook(
-                "🟢 Server Change Successful",
+            local success =
+                sendWebhook(
 
-                "**Username:** test_webhook" ..
-                "\n**Display Name:** Test Webhook" ..
-                "\n**User ID:** 123456789" ..
-                "\n**Attempt:** 1/20" ..
-                "\n**Place ID:** 987654321" ..
-                "\n**Job ID:** `test-job-id-123456`" ..
-                "\n**Status:** Server change successful",
+                    "🟢 Server Change Successful",
 
-                SUCCESS_COLOR
-            )
+                    "**Username:** test_webhook" ..
+
+                    "\n**Display Name:** Test Webhook" ..
+
+                    "\n**User ID:** 123456789" ..
+
+                    "\n**Attempt:** 1/20" ..
+
+                    "\n**Place ID:** 987654321" ..
+
+                    "\n**Job ID:** `test-job-id-123456`" ..
+
+                    "\n**Status:** Server change successful",
+
+                    SUCCESS_COLOR
+
+                )
 
             if success then
 
                 WindUI:Notify({
-                    Title = "Webhook",
-                    Content = "Test successful webhook sent.",
-                    Icon = "check",
+
+                    Title =
+                        "Webhook",
+
+                    Content =
+                        "Test successful webhook sent.",
+
+                    Icon =
+                        "check",
+
                     Duration = 3
+
                 })
 
             else
 
                 WindUI:Notify({
-                    Title = "Webhook",
-                    Content = "ส่ง Webhook ไม่สำเร็จ",
-                    Icon = "triangle-alert",
+
+                    Title =
+                        "Webhook",
+
+                    Content =
+                        "ส่ง Webhook ไม่สำเร็จ",
+
+                    Icon =
+                        "triangle-alert",
+
                     Duration = 3
+
                 })
 
             end
@@ -385,26 +558,35 @@ WebhookTab:Button({
         end)
 
     end
+
 })
 
 --==================================================
--- CLEAR ALL USERNAMES
+-- CLEAR USERNAMES
 --==================================================
 
 Tab:Button({
-    Title = "Clear All Username",
-    Icon = "trash-2",
+
+    Title =
+        "Clear All Username",
+
+    Icon =
+        "trash-2",
 
     Callback = function()
 
         for i = 1, MAX_USERS do
 
-            usernameValues[i] = ""
+            usernameValues[i] =
+                ""
 
             pcall(function()
 
                 if UsernameInputs[i].SetValue then
-                    UsernameInputs[i]:SetValue("")
+
+                    UsernameInputs[i]:
+                        SetValue("")
+
                 end
 
             end)
@@ -414,73 +596,350 @@ Tab:Button({
         saveConfig()
 
         WindUI:Notify({
-            Title = "Username",
-            Content = "All usernames cleared.",
-            Icon = "check",
+
+            Title =
+                "Username",
+
+            Content =
+                "All usernames cleared.",
+
+            Icon =
+                "check",
+
             Duration = 3
+
         })
 
     end
+
 })
 
 --==================================================
--- TELEPORT SUCCESS
+-- SERVER API
 --==================================================
 
-local function sendTeleportSuccess(attempt)
+local function getServers()
 
-    sendWebhook(
-        "🟢 Server Change Successful",
+    local servers = {}
+    local cursor = ""
 
-        "**Username:** " ..
-        player.Name ..
+    for page = 1, 3 do
 
-        "\n**Display Name:** " ..
-        player.DisplayName ..
+        local url =
+            "https://games.roblox.com/v1/games/" ..
+            tostring(game.PlaceId) ..
+            "/servers/Public?sortOrder=Asc&limit=" ..
+            SERVER_FETCH_LIMIT
 
-        "\n**User ID:** " ..
-        player.UserId ..
+        if cursor ~= "" then
 
-        "\n**Attempt:** " ..
-        attempt ..
-        "/" ..
-        MAX_RETRY ..
+            url =
+                url ..
+                "&cursor=" ..
+                HttpService:UrlEncode(cursor)
 
-        "\n**Place ID:** " ..
-        game.PlaceId ..
+        end
 
-        "\n**New Job ID:** `" ..
-        game.JobId ..
-        "`" ..
+        local success, result =
+            pcall(function()
 
-        "\n**Status:** Server change successful",
+                return game:HttpGet(url)
 
-        SUCCESS_COLOR
-    )
+            end)
+
+        if not success then
+
+            return servers
+
+        end
+
+        local decoded
+
+        local decodeSuccess =
+            pcall(function()
+
+                decoded =
+                    HttpService:JSONDecode(
+                        result
+                    )
+
+            end)
+
+        if not decodeSuccess
+            or type(decoded) ~= "table" then
+
+            return servers
+
+        end
+
+        if type(decoded.data) == "table" then
+
+            for _, server in
+                ipairs(decoded.data) do
+
+                if type(server) == "table"
+                    and server.id
+                    and server.playing
+                    and server.maxPlayers then
+
+                    if server.playing <
+                        server.maxPlayers then
+
+                        table.insert(
+                            servers,
+                            server
+                        )
+
+                    end
+
+                end
+
+            end
+
+        end
+
+        cursor =
+            decoded.nextPageCursor
+
+        if not cursor
+            or cursor == "" then
+
+            break
+
+        end
+
+    end
+
+    return servers
 
 end
 
 --==================================================
--- TELEPORT FAILURE
+-- FIND DIFFERENT SERVER
 --==================================================
 
-local function teleportFailed(reason)
+local function findDifferentServer()
 
-    if not teleporting then
+    local currentJobId =
+        game.JobId
+
+    local servers =
+        getServers()
+
+    if #servers == 0 then
+        return nil
+    end
+
+    -- สุ่มจุดเริ่มต้น
+    local startIndex =
+        math.random(
+            1,
+            #servers
+        )
+
+    for offset = 0,
+        #servers - 1 do
+
+        local index =
+            ((startIndex + offset - 1)
+                % #servers) + 1
+
+        local server =
+            servers[index]
+
+        if server
+            and server.id
+            and server.id ~= currentJobId then
+
+            return server.id
+
+        end
+
+    end
+
+    return nil
+
+end
+
+--==================================================
+-- SEND ATTEMPT WEBHOOK
+--==================================================
+
+local function sendAttemptWebhook(
+    attempt,
+    targetJobId
+)
+
+    if lastAttemptSent == attempt then
         return
     end
 
-    teleporting = false
+    lastAttemptSent =
+        attempt
 
-    if retryCount >= MAX_RETRY then
+    task.spawn(function()
 
         sendWebhook(
+
+            "🔵 Server Change Attempt",
+
+            "**Attempt:** " ..
+            attempt ..
+            "/" ..
+            MAX_RETRY ..
+
+            "\n**Place ID:** " ..
+            game.PlaceId ..
+
+            "\n**Current Job ID:** `" ..
+            game.JobId ..
+            "`" ..
+
+            "\n**Target Job ID:** `" ..
+            tostring(targetJobId) ..
+            "`" ..
+
+            "\n**Status:** Attempting server change...",
+
+            ATTEMPT_COLOR
+
+        )
+
+    end)
+
+end
+
+--==================================================
+-- BLACKLIST WEBHOOK
+--==================================================
+
+local function sendBlacklistWebhook(
+    target
+)
+
+    if not target then
+        return
+    end
+
+    -- กันส่งคนเดิมซ้ำในรอบเดียวกัน
+    local key =
+        tostring(target.UserId) ..
+        ":" ..
+        tostring(game.JobId)
+
+    if lastFoundUsername == key then
+        return
+    end
+
+    lastFoundUsername =
+        key
+
+    task.spawn(function()
+
+        sendWebhook(
+
+            "🟡 Blacklisted Player Found",
+
+            "**Username:** " ..
+            target.Name ..
+
+            "\n**Display Name:** " ..
+            target.DisplayName ..
+
+            "\n**User ID:** " ..
+            target.UserId ..
+
+            "\n**Place ID:** " ..
+            game.PlaceId ..
+
+            "\n**Job ID:** `" ..
+            game.JobId ..
+            "`",
+
+            FOUND_COLOR
+
+        )
+
+    end)
+
+end
+
+--==================================================
+-- SUCCESS WEBHOOK
+--==================================================
+
+local function sendSuccessWebhook(
+    attempt,
+    oldJobId
+)
+
+    if lastSuccessJob ==
+        game.JobId then
+
+        return
+
+    end
+
+    lastSuccessJob =
+        game.JobId
+
+    task.spawn(function()
+
+        sendWebhook(
+
+            "🟢 Server Change Successful",
+
+            "**Username:** " ..
+            player.Name ..
+
+            "\n**Display Name:** " ..
+            player.DisplayName ..
+
+            "\n**User ID:** " ..
+            player.UserId ..
+
+            "\n**Attempt:** " ..
+            attempt ..
+            "/" ..
+            MAX_RETRY ..
+
+            "\n**Place ID:** " ..
+            game.PlaceId ..
+
+            "\n**Old Job ID:** `" ..
+            tostring(oldJobId) ..
+            "`" ..
+
+            "\n**New Job ID:** `" ..
+            game.JobId ..
+            "`" ..
+
+            "\n**Status:** Server change successful",
+
+            SUCCESS_COLOR
+
+        )
+
+    end)
+
+end
+
+--==================================================
+-- FAILED WEBHOOK
+--==================================================
+
+local function sendFailedWebhook(
+    reason
+)
+
+    task.spawn(function()
+
+        sendWebhook(
+
             "🔴 Server Change Failed",
 
-            "ไม่สามารถย้ายเซิร์ฟได้" ..
-
-            "\n**Reason:** " ..
-            tostring(reason or "Unknown") ..
+            "**Reason:** " ..
+            tostring(reason) ..
 
             "\n**Attempts:** " ..
             retryCount ..
@@ -495,29 +954,10 @@ local function teleportFailed(reason)
             "`",
 
             FAILED_COLOR
+
         )
 
-        WindUI:Notify({
-            Title = "Server Change Failed",
-            Content =
-                "Failed after " ..
-                retryCount ..
-                "/" ..
-                MAX_RETRY ..
-                " attempts.",
-
-            Icon = "x",
-            Duration = 5
-        })
-
-        return
-    end
-
-    task.wait(TELEPORT_COOLDOWN)
-
-    if enabled then
-        _G.NubNubStartTeleport()
-    end
+    end)
 
 end
 
@@ -537,121 +977,197 @@ local function startTeleport()
 
     if retryCount >= MAX_RETRY then
 
-        sendWebhook(
-            "🔴 Server Change Failed",
-
-            "ถึงจำนวน Retry สูงสุดแล้ว" ..
-
-            "\n**Attempts:** " ..
-            retryCount ..
-            "/" ..
-            MAX_RETRY ..
-
-            "\n**Place ID:** " ..
-            game.PlaceId ..
-
-            "\n**Job ID:** `" ..
-            game.JobId ..
-            "`",
-
-            FAILED_COLOR
+        sendFailedWebhook(
+            "Maximum retry reached"
         )
 
         return
+
     end
 
-    teleporting = true
+    --==============================================
+    -- INCREASE ATTEMPT
+    --==============================================
 
     retryCount += 1
 
-    local currentAttempt = retryCount
-    local jobBeforeTeleport = game.JobId
+    local currentAttempt =
+        retryCount
 
     --==============================================
-    -- WEBHOOK ATTEMPT
+    -- FIND NEW SERVER
     --==============================================
 
-    if lastAttemptSent ~= currentAttempt then
+    WindUI:Notify({
 
-        lastAttemptSent = currentAttempt
+        Title =
+            "Finding Server",
 
-        task.spawn(function()
+        Content =
+            "Searching for a different server...",
 
-            sendWebhook(
-                "🔵 Server Change Attempt",
+        Icon =
+            "search",
 
-                "**Attempt:** " ..
-                currentAttempt ..
-                "/" ..
-                MAX_RETRY ..
+        Duration = 3
 
-                "\n**Place ID:** " ..
-                game.PlaceId ..
+    })
 
-                "\n**Old Job ID:** `" ..
-                jobBeforeTeleport ..
-                "`" ..
+    local targetJobId =
+        findDifferentServer()
 
-                "\n**Status:** Attempting server change...",
+    if not targetJobId then
 
-                ATTEMPT_COLOR
+        WindUI:Notify({
+
+            Title =
+                "Server Search Failed",
+
+            Content =
+                "Could not find another server.",
+
+            Icon =
+                "triangle-alert",
+
+            Duration = 3
+
+        })
+
+        if currentAttempt >=
+            MAX_RETRY then
+
+            sendFailedWebhook(
+                "Could not find another server"
             )
 
-        end)
+            return
+
+        end
+
+        task.delay(
+            TELEPORT_COOLDOWN,
+            function()
+
+                if enabled then
+                    startTeleport()
+                end
+
+            end
+        )
+
+        return
 
     end
+
+    --==============================================
+    -- STATE
+    --==============================================
+
+    teleporting = true
+
+    local oldJobId =
+        game.JobId
+
+    --==============================================
+    -- WEBHOOK
+    --==============================================
+
+    sendAttemptWebhook(
+        currentAttempt,
+        targetJobId
+    )
 
     --==============================================
     -- UI
     --==============================================
 
     WindUI:Notify({
-        Title = "Changing Server",
+
+        Title =
+            "Changing Server",
+
         Content =
             "Attempt " ..
             currentAttempt ..
             "/" ..
             MAX_RETRY,
 
-        Icon = "refresh-cw",
+        Icon =
+            "refresh-cw",
+
         Duration = 3
+
     })
+
+    --==============================================
+    -- TELEPORT DATA
+    --==============================================
+
+    local data = {
+
+        NubNubTeleport =
+            true,
+
+        Attempt =
+            currentAttempt,
+
+        SourceJobId =
+            oldJobId,
+
+        TargetJobId =
+            targetJobId
+
+    }
 
     --==============================================
     -- TELEPORT
     --==============================================
 
-    local teleportCalled = false
+    local success, errorMessage =
+        pcall(function()
 
-    local success, errorMessage = pcall(function()
+            TeleportService:
+                TeleportToPlaceInstance(
 
-        -- ใช้ Teleport ฝั่ง Client
-        -- แทน TeleportAsync ที่อาจไม่ทำงานใน Client
+                    game.PlaceId,
 
-        TeleportService:Teleport(
-            game.PlaceId,
-            player
-        )
+                    targetJobId,
 
-        teleportCalled = true
+                    player,
 
-    end)
+                    nil,
+
+                    data
+
+                )
+
+        end)
 
     if not success then
 
-        teleportFailed(
-            "Teleport error: " ..
-            tostring(errorMessage)
-        )
+        teleporting = false
 
-        return
+        if currentAttempt >=
+            MAX_RETRY then
 
-    end
+            sendFailedWebhook(
+                "Teleport error: " ..
+                tostring(errorMessage)
+            )
 
-    if not teleportCalled then
+            return
 
-        teleportFailed(
-            "Teleport was not called"
+        end
+
+        task.delay(
+            TELEPORT_COOLDOWN,
+            function()
+
+                if enabled then
+                    startTeleport()
+                end
+
+            end
         )
 
         return
@@ -659,60 +1175,52 @@ local function startTeleport()
     end
 
     --==============================================
-    -- TIMEOUT CHECK
+    -- TIMEOUT
     --==============================================
 
     task.spawn(function()
 
-        local startTime = os.clock()
+        local startTime =
+            os.clock()
 
         while teleporting
-            and os.clock() - startTime < TELEPORT_TIMEOUT do
+            and
+            os.clock() - startTime
+                < TELEPORT_TIMEOUT do
 
             task.wait(1)
 
-            -- ถ้า Job ID เปลี่ยน
-            -- แปลว่าย้ายเซิร์ฟสำเร็จแล้ว
+        end
 
-            if game.JobId ~= jobBeforeTeleport
-                and game.JobId ~= "" then
+        if not teleporting then
+            return
+        end
 
-                teleporting = false
+        -- ยังอยู่เซิร์ฟเดิม
+        if game.JobId ==
+            oldJobId then
 
-                sendTeleportSuccess(
-                    currentAttempt
+            teleporting =
+                false
+
+            if currentAttempt >=
+                MAX_RETRY then
+
+                sendFailedWebhook(
+                    "Teleport timeout"
                 )
-
-                WindUI:Notify({
-                    Title = "Server Changed",
-                    Content =
-                        "Server change successful.\n" ..
-                        "Attempt " ..
-                        currentAttempt ..
-                        "/" ..
-                        MAX_RETRY,
-
-                    Icon = "check",
-                    Duration = 4
-                })
 
                 return
 
             end
 
-        end
-
-        --==========================================
-        -- TIMEOUT
-        --==========================================
-
-        if teleporting then
-
-            teleportFailed(
-                "Teleport timeout (" ..
-                TELEPORT_TIMEOUT ..
-                " seconds)"
+            task.wait(
+                TELEPORT_COOLDOWN
             )
+
+            if enabled then
+                startTeleport()
+            end
 
         end
 
@@ -720,10 +1228,11 @@ local function startTeleport()
 
 end
 
-_G.NubNubStartTeleport = startTeleport
+_G.NubNubStartTeleport =
+    startTeleport
 
 --==================================================
--- SERVER CHECK
+-- CHECK CURRENT SERVER
 --==================================================
 
 local function checkServer()
@@ -736,60 +1245,38 @@ local function checkServer()
         return
     end
 
-    for _, otherPlayer in ipairs(
-        Players:GetPlayers()
-    ) do
+    local target =
+        findBlacklistedPlayer()
 
-        if otherPlayer ~= player
-            and isBlacklisted(otherPlayer.Name) then
+    --==============================================
+    -- BLACKLIST FOUND
+    --==============================================
 
-            --======================================
-            -- BLACKLIST FOUND
-            --======================================
+    if target then
 
-            task.spawn(function()
+        sendBlacklistWebhook(
+            target
+        )
 
-                sendWebhook(
-                    "🟡 Blacklisted Player Found",
+        WindUI:Notify({
 
-                    "**Username:** " ..
-                    otherPlayer.Name ..
+            Title =
+                "Player Found",
 
-                    "\n**Display Name:** " ..
-                    otherPlayer.DisplayName ..
+            Content =
+                target.Name ..
+                " is in blacklist.\nChanging server...",
 
-                    "\n**User ID:** " ..
-                    otherPlayer.UserId ..
+            Icon =
+                "triangle-alert",
 
-                    "\n**Place ID:** " ..
-                    game.PlaceId ..
+            Duration = 3
 
-                    "\n**Job ID:** `" ..
-                    game.JobId ..
-                    "`",
+        })
 
-                    FOUND_COLOR
-                )
-
-            end)
-
-            WindUI:Notify({
-                Title = "Player Found",
-                Content =
-                    otherPlayer.Name ..
-                    " is in blacklist.\nChanging server...",
-
-                Icon = "triangle-alert",
-                Duration = 3
-            })
-
-            --======================================
-            -- START TELEPORT
-            --======================================
-
-            task.spawn(function()
-
-                task.wait(TELEPORT_COOLDOWN)
+        task.delay(
+            TELEPORT_COOLDOWN,
+            function()
 
                 if enabled
                     and not teleporting then
@@ -798,184 +1285,131 @@ local function checkServer()
 
                 end
 
-            end)
-
-            return
-
-        end
-
-    end
-
-end
-
---==================================================
--- GLOBAL CHECK
---==================================================
-
-_G.NubNubCheckServer = checkServer
-
---==================================================
--- TELEPORT INIT FAILED
---==================================================
-
-TeleportService.TeleportInitFailed:Connect(
-    function(
-        failedPlayer,
-        teleportResult,
-        errorMessage
-    )
-
-        -- สนใจเฉพาะ LocalPlayer
-        if failedPlayer
-            and failedPlayer ~= player then
-
-            return
-
-        end
-
-        if not teleporting then
-            return
-        end
-
-        local reason =
-            tostring(errorMessage or teleportResult or "Unknown")
-
-        teleportFailed(
-            "TeleportInitFailed: " ..
-            reason
+            end
         )
 
-    end
-)
-
---==================================================
--- CONFIG REGISTER
---==================================================
-
-if Config then
-
-    Config:Register(
-        "AutoChangeServer",
-        AutoChangeServerToggle
-    )
-
-    Config:Register(
-        "WebhookEnabled",
-        WebhookToggle
-    )
-
-    Config:Register(
-        "WebhookURL",
-        WebhookInput
-    )
-
-    for i = 1, MAX_USERS do
-
-        Config:Register(
-            "Username_" .. i,
-            UsernameInputs[i]
-        )
+        return
 
     end
 
-    pcall(function()
-        Config:Load()
-    end)
+    --==============================================
+    -- SERVER SAFE
+    --==============================================
 
-end
+    if arrivingFromTeleport then
 
---==================================================
--- WAIT FOR CONFIG
---==================================================
+        arrivingFromTeleport =
+            false
 
-task.wait(1)
+        local attempt =
+            retryCount
 
-configLoaded = true
+        local oldJobId = ""
 
---==================================================
--- READ LOADED CONFIG
---==================================================
+        if type(teleportData)
+            == "table" then
 
-if AutoChangeServerToggle then
-    enabled =
-        AutoChangeServerToggle.Value
-end
-
-if WebhookToggle then
-    webhookEnabled =
-        WebhookToggle.Value
-end
-
-for i = 1, MAX_USERS do
-
-    local input =
-        UsernameInputs[i]
-
-    if input and input.Value then
-
-        usernameValues[i] =
-            cleanUsername(input.Value)
-
-    end
-
-end
-
-if WebhookInput
-    and WebhookInput.Value then
-
-    WebhookURL =
-        tostring(
-            WebhookInput.Value or ""
-        )
-
-end
-
-saveConfig()
-
---==================================================
--- CHECK TELEPORT SUCCESS
---==================================================
-
-task.spawn(function()
-
-    task.wait(2)
-
-    -- ถ้าเราเข้ามาเซิร์ฟใหม่
-    -- และ Job ID เปลี่ยนจากตอนก่อน Teleport
-
-    if game.JobId ~= originalJobId
-        and game.JobId ~= "" then
-
-        -- ไม่ส่งซ้ำถ้าไม่มี teleport state
-        -- เพราะเซิร์ฟอาจถูกเข้าโดยปกติ
-
-    end
-
-end)
-
---==================================================
--- START CHECK
---==================================================
-
-task.wait(0.5)
-
-checkServer()
-
---==================================================
--- PLAYER JOIN
---==================================================
-
-Players.PlayerAdded:Connect(
-    function(newPlayer)
-
-        task.wait(1)
-
-        if enabled
-            and not teleporting then
-
-            checkServer()
+            oldJobId =
+                tostring(
+                    teleportData.SourceJobId
+                    or ""
+                )
 
         end
 
+        -- ยืนยันว่าเซิร์ฟใหม่ไม่ใช่เซิร์ฟเดิม
+        if game.JobId ~= ""
+            and game.JobId ~= oldJobId then
+
+            sendSuccessWebhook(
+                attempt,
+                oldJobId
+            )
+
+            WindUI:Notify({
+
+                Title =
+                    "Server Changed",
+
+                Content =
+                    "New server is safe.\n" ..
+                    "Attempt " ..
+                    attempt ..
+                    "/" ..
+                    MAX_RETRY,
+
+                Icon =
+                    "check",
+
+                Duration = 4
+
+            })
+
+        end
+
+        return
+
     end
-)
+
+end
+
+_G.NubNubCheckServer =
+    checkServer
+
+--==================================================
+-- TELEPORT FAILED EVENT
+--==================================================
+
+TeleportService.TeleportInitFailed:
+    Connect(
+        function(
+            failedPlayer,
+            teleportResult,
+            errorMessage
+        )
+
+            if failedPlayer
+                and failedPlayer ~= player then
+
+                return
+
+            end
+
+            if not teleporting then
+                return
+            end
+
+            teleporting =
+                false
+
+            local reason =
+                tostring(
+                    errorMessage
+                    or teleportResult
+                    or "Unknown"
+                )
+
+            local currentAttempt =
+                retryCount
+
+            if currentAttempt >=
+                MAX_RETRY then
+
+                sendFailedWebhook(
+                    "TeleportInitFailed: " ..
+                    reason
+                )
+
+                return
+
+            end
+
+            task.delay(
+                TELEPORT_COOLDOWN,
+                function()
+
+                    if enabled then
+                        startTeleport()
+                    end
+
+               
