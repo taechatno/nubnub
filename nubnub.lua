@@ -19,6 +19,7 @@ local player = Players.LocalPlayer
 local MAX_USERS = 15
 
 local TELEPORT_COOLDOWN = 3
+local SERVER_CHECK_INTERVAL = 30
 local MAX_RETRY = 20
 
 -- Webhook Colors
@@ -104,18 +105,24 @@ AutoChangeServerToggle = Tab:Toggle({
     Value = true,
 
     Callback = function(value)
+
         enabled = value
         saveConfig()
 
         if value and configLoaded then
+
             task.spawn(function()
+
                 task.wait(0.1)
 
                 if _G.NubNubCheckServer then
                     _G.NubNubCheckServer()
                 end
+
             end)
+
         end
+
     end
 })
 
@@ -416,16 +423,22 @@ Tab:Button({
 })
 
 --==================================================
--- SEND SUCCESS AFTER TELEPORT
+-- REJOIN CURRENT PLACE
 --==================================================
 
 local rejoinCurrentPlace
 
+--==================================================
+-- CHECK TELEPORT SUCCESS
+--==================================================
+
 local function checkTeleportData()
+
     local teleportData
 
     pcall(function()
-        teleportData = TeleportService:GetLocalPlayerTeleportData()
+        teleportData =
+            TeleportService:GetLocalPlayerTeleportData()
     end)
 
     if not teleportData then
@@ -436,44 +449,66 @@ local function checkTeleportData()
         return
     end
 
-    local attempt = tonumber(teleportData.Attempt) or 1
+    local attempt =
+        tonumber(teleportData.Attempt) or 1
 
     task.wait(2)
 
-    -- Important: only report success when the new server is actually safe.
+    -- Check new server again
     for _, otherPlayer in ipairs(Players:GetPlayers()) do
-        if otherPlayer ~= player and isBlacklisted(otherPlayer.Name) then
+
+        if otherPlayer ~= player
+            and isBlacklisted(otherPlayer.Name) then
+
             WindUI:Notify({
                 Title = "Blacklist Still Found",
-                Content = otherPlayer.Name .. " is still here. Rejoining again...",
+                Content =
+                    otherPlayer.Name ..
+                    " is still here. Rejoining again...",
                 Icon = "triangle-alert",
                 Duration = 3
             })
 
             teleporting = false
+
+            task.wait(1)
+
             rejoinCurrentPlace()
+
             return
+
         end
+
     end
 
-    sendWebhook(
+    -- New server is safe
+    local webhookSuccess = sendWebhook(
+
         "🟢 Server Change Successful",
+
         "**Username:** " .. player.Name ..
         "\n**Display Name:** " .. player.DisplayName ..
         "\n**User ID:** " .. player.UserId ..
         "\n**Attempt:** " .. attempt .. "/" .. MAX_RETRY ..
         "\n**Place ID:** " .. game.PlaceId ..
         "\n**New Job ID:** `" .. game.JobId .. "`" ..
-        "\n**Status:** Left old server and joined again successfully",
+        "\n**Status:** Server change successful",
+
         SUCCESS_COLOR
+
     )
 
     WindUI:Notify({
         Title = "Server Changed",
-        Content = "Rejoin successful.\nAttempt " .. attempt .. "/" .. MAX_RETRY,
+        Content =
+            "Rejoin successful.\n" ..
+            "Attempt " .. attempt .. "/" .. MAX_RETRY,
         Icon = "check",
         Duration = 4
     })
+
+    teleporting = false
+
 end
 
 --==================================================
@@ -481,6 +516,7 @@ end
 --==================================================
 
 rejoinCurrentPlace = function()
+
     if teleporting then
         return
     end
@@ -489,80 +525,143 @@ rejoinCurrentPlace = function()
     retryCount += 1
 
     if retryCount > MAX_RETRY then
+
         task.spawn(function()
+
             sendWebhook(
                 "🔴 Server Change Failed",
+
                 "Auto rejoin reached maximum attempts." ..
-                "\n**Attempts:** " .. retryCount .. "/" .. MAX_RETRY ..
+                "\n**Attempts:** " ..
+                retryCount .. "/" .. MAX_RETRY ..
                 "\n**Place ID:** " .. game.PlaceId ..
                 "\n**Job ID:** `" .. game.JobId .. "`",
+
                 FAILED_COLOR
             )
+
         end)
+
         teleporting = false
+
         return
     end
 
-    task.spawn(function()
-        sendWebhook(
-            "🔵 Server Rejoin Attempt",
-            "**Attempt:** " .. retryCount .. "/" .. MAX_RETRY ..
-            "\n**Place ID:** " .. game.PlaceId ..
-            "\n**Old Job ID:** `" .. game.JobId .. "`" ..
-            "\n**Status:** Leaving current server and rejoining...",
-            ATTEMPT_COLOR
-        )
-    end)
+    --==================================================
+    -- BLUE WEBHOOK ONLY ATTEMPT 2+
+    --==================================================
+
+    if retryCount >= 2 then
+
+        task.spawn(function()
+
+            sendWebhook(
+                "🔵 Server Rejoin Attempt",
+
+                "**Attempt:** " ..
+                retryCount .. "/" .. MAX_RETRY ..
+
+                "\n**Place ID:** " ..
+                game.PlaceId ..
+
+                "\n**Old Job ID:** `" ..
+                game.JobId .. "`" ..
+
+                "\n**Status:** Leaving current server and rejoining...",
+
+                ATTEMPT_COLOR
+            )
+
+        end)
+
+    end
 
     WindUI:Notify({
         Title = "Rejoining Server",
-        Content = "Leaving current server and joining again...\nAttempt " .. retryCount .. "/" .. MAX_RETRY,
+        Content =
+            "Leaving current server and joining again...\n" ..
+            "Attempt " .. retryCount .. "/" .. MAX_RETRY,
         Icon = "refresh-cw",
         Duration = 3
     })
 
-    local teleportOptions = Instance.new("TeleportOptions")
+    local teleportOptions =
+        Instance.new("TeleportOptions")
+
     teleportOptions:SetTeleportData({
+
         NubNubTeleport = true,
+
         Attempt = retryCount,
+
         AutoRejoin = true
+
     })
 
-    -- No public-server HTTP API is used here, so this path avoids
-    -- the games.roblox.com server-list request that can return HTTP 429.
+    --==================================================
+    -- TELEPORT
+    --==================================================
+
     local success = pcall(function()
+
         TeleportService:TeleportAsync(
             game.PlaceId,
             {player},
             teleportOptions
         )
+
     end)
 
-    -- Client/executor environments may reject TeleportAsync.
-    -- Try the legacy client teleport as a compatibility fallback.
+    --==================================================
+    -- FALLBACK
+    --==================================================
+
     if not success then
-        local fallbackSuccess = pcall(function()
-            TeleportService:Teleport(game.PlaceId, player)
-        end)
+
+        local fallbackSuccess =
+            pcall(function()
+
+                TeleportService:Teleport(
+                    game.PlaceId,
+                    player
+                )
+
+            end)
 
         if not fallbackSuccess then
+
             teleporting = false
 
             task.spawn(function()
+
                 sendWebhook(
                     "🔴 Server Rejoin Failed",
+
                     "Teleport request could not be started." ..
-                    "\n**Attempt:** " .. retryCount .. "/" .. MAX_RETRY ..
-                    "\n**Place ID:** " .. game.PlaceId ..
-                    "\n**Job ID:** `" .. game.JobId .. "`",
+                    "\n**Attempt:** " ..
+                    retryCount .. "/" .. MAX_RETRY ..
+                    "\n**Place ID:** " ..
+                    game.PlaceId ..
+                    "\n**Job ID:** `" ..
+                    game.JobId .. "`",
+
                     FAILED_COLOR
                 )
+
             end)
+
         end
+
     end
+
 end
 
+--==================================================
+-- CHECK SERVER
+--==================================================
+
 local function checkServer()
+
     if not enabled then
         return
     end
@@ -571,34 +670,57 @@ local function checkServer()
         return
     end
 
-    for _, otherPlayer in ipairs(Players:GetPlayers()) do
-        if otherPlayer ~= player and isBlacklisted(otherPlayer.Name) then
-            -- Do not query the public-server HTTP API.
-            -- Simply leave this server and rejoin the same Place.
+    for _, otherPlayer in ipairs(
+        Players:GetPlayers()
+    ) do
+
+        if otherPlayer ~= player
+            and isBlacklisted(otherPlayer.Name) then
+
             task.spawn(function()
+
                 sendWebhook(
                     "🟡 Blacklisted Player Found",
-                    "**Username:** " .. otherPlayer.Name ..
-                    "\n**Display Name:** " .. otherPlayer.DisplayName ..
-                    "\n**User ID:** " .. otherPlayer.UserId ..
-                    "\n**Place ID:** " .. game.PlaceId ..
-                    "\n**Job ID:** `" .. game.JobId .. "`" ..
+
+                    "**Username:** " ..
+                    otherPlayer.Name ..
+
+                    "\n**Display Name:** " ..
+                    otherPlayer.DisplayName ..
+
+                    "\n**User ID:** " ..
+                    otherPlayer.UserId ..
+
+                    "\n**Place ID:** " ..
+                    game.PlaceId ..
+
+                    "\n**Job ID:** `" ..
+                    game.JobId .. "`" ..
+
                     "\n**Action:** Leave + Rejoin",
+
                     FOUND_COLOR
                 )
+
             end)
 
             WindUI:Notify({
                 Title = "Player Found",
-                Content = otherPlayer.Name .. " is in blacklist.\nLeaving and rejoining...",
+                Content =
+                    otherPlayer.Name ..
+                    " is in blacklist.\n" ..
+                    "Leaving and rejoining...",
                 Icon = "triangle-alert",
                 Duration = 3
             })
 
             rejoinCurrentPlace()
+
             return
         end
+
     end
+
 end
 
 --==================================================
@@ -608,25 +730,53 @@ end
 _G.NubNubCheckServer = checkServer
 
 --==================================================
+-- AUTO CHECK EVERY 30 SECONDS
+--==================================================
+
+task.spawn(function()
+
+    while true do
+
+        task.wait(SERVER_CHECK_INTERVAL)
+
+        if enabled and not teleporting then
+
+            checkServer()
+
+        end
+
+    end
+
+end)
+
+--==================================================
 -- TELEPORT FAILED
 --==================================================
 
 pcall(function()
-    TeleportService.TeleportInitFailed:Connect(function()
-        teleporting = false
 
-        if not enabled then
-            return
-        end
+    TeleportService.TeleportInitFailed:Connect(
+        function()
 
-        -- If Roblox rejects the rejoin, wait briefly and try again.
-        task.spawn(function()
-            task.wait(1)
-            if enabled then
-                rejoinCurrentPlace()
+            teleporting = false
+
+            if not enabled then
+                return
             end
-        end)
-    end)
+
+            task.spawn(function()
+
+                task.wait(1)
+
+                if enabled then
+                    rejoinCurrentPlace()
+                end
+
+            end)
+
+        end
+    )
+
 end)
 
 --==================================================
@@ -649,6 +799,7 @@ Tab:Button({
                 and isBlacklisted(otherPlayer.Name) then
 
                 found = true
+
                 break
 
             end
@@ -721,13 +872,17 @@ configLoaded = true
 --==================================================
 
 if AutoChangeServerToggle then
+
     enabled =
         AutoChangeServerToggle.Value
+
 end
 
 if WebhookToggle then
+
     webhookEnabled =
         WebhookToggle.Value
+
 end
 
 for i = 1, MAX_USERS do
