@@ -1,6 +1,8 @@
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 --==================================================
 -- WINDUI
@@ -29,12 +31,15 @@ local FOUND_COLOR = 16776960
 local FAILED_COLOR = 16711680
 
 local enabled = true
+local autoReconnectEnabled = true
 local webhookEnabled = true
 
 local usernameValues = {}
 local WebhookURL = ""
 
 local teleporting = false
+local blacklistEscapeActive = false
+local reconnectClickBusy = false
 local retryCount = 0
 local configLoaded = false
 
@@ -86,6 +91,28 @@ end
 local Tab = Window:Tab({
     Title = "Server",
     Icon = "users"
+})
+
+--==================================================
+-- CONNECTION RECOVERY
+--==================================================
+
+Tab:Section({
+    Title = "Connection Recovery"
+})
+
+local AutoReconnectToggle
+
+AutoReconnectToggle = Tab:Toggle({
+    Title = "Auto Reconnect",
+    Desc = "Press Reconnect only when the Leave / Reconnect disconnect prompt appears",
+    Flag = "AutoReconnect",
+    Value = true,
+
+    Callback = function(value)
+        autoReconnectEnabled = value
+        saveConfig()
+    end
 })
 
 --==================================================
@@ -348,7 +375,7 @@ WebhookTab:Button({
         task.spawn(function()
 
             local success = sendWebhook(
-                "🟢 Server Change Successful",
+                "๐ข Server Change Successful",
 
                 "**Username:** test_webhook" ..
                 "\n**Display Name:** Test Webhook" ..
@@ -374,7 +401,7 @@ WebhookTab:Button({
 
                 WindUI:Notify({
                     Title = "Webhook",
-                    Content = "ส่ง Webhook ไม่สำเร็จ",
+                    Content = "เธชเนเธ Webhook เนเธกเนเธชเธณเน€เธฃเนเธ",
                     Icon = "triangle-alert",
                     Duration = 3
                 })
@@ -470,6 +497,7 @@ local function checkTeleportData()
             })
 
             teleporting = false
+            blacklistEscapeActive = true
 
             task.wait(1)
 
@@ -482,9 +510,11 @@ local function checkTeleportData()
     end
 
     -- New server is safe
+    blacklistEscapeActive = false
+
     local webhookSuccess = sendWebhook(
 
-        "🟢 Server Change Successful",
+        "๐ข Server Change Successful",
 
         "**Username:** " .. player.Name ..
         "\n**Display Name:** " .. player.DisplayName ..
@@ -521,6 +551,9 @@ rejoinCurrentPlace = function()
         return
     end
 
+    -- Safety lock: while the blacklist system is leaving/rejoining,
+    -- Auto Reconnect must never send us back to the old server.
+    blacklistEscapeActive = true
     teleporting = true
     retryCount += 1
 
@@ -529,7 +562,7 @@ rejoinCurrentPlace = function()
         task.spawn(function()
 
             sendWebhook(
-                "🔴 Server Change Failed",
+                "๐”ด Server Change Failed",
 
                 "Auto rejoin reached maximum attempts." ..
                 "\n**Attempts:** " ..
@@ -556,7 +589,7 @@ rejoinCurrentPlace = function()
         task.spawn(function()
 
             sendWebhook(
-                "🔵 Server Rejoin Attempt",
+                "๐”ต Server Rejoin Attempt",
 
                 "**Attempt:** " ..
                 retryCount .. "/" .. MAX_RETRY ..
@@ -635,7 +668,7 @@ rejoinCurrentPlace = function()
             task.spawn(function()
 
                 sendWebhook(
-                    "🔴 Server Rejoin Failed",
+                    "๐”ด Server Rejoin Failed",
 
                     "Teleport request could not be started." ..
                     "\n**Attempt:** " ..
@@ -677,10 +710,13 @@ local function checkServer()
         if otherPlayer ~= player
             and isBlacklisted(otherPlayer.Name) then
 
+            -- Lock Auto Reconnect BEFORE any leave / teleport work starts.
+            blacklistEscapeActive = true
+
             task.spawn(function()
 
                 sendWebhook(
-                    "🟡 Blacklisted Player Found",
+                    "๐ก Blacklisted Player Found",
 
                     "**Username:** " ..
                     otherPlayer.Name ..
@@ -747,6 +783,145 @@ task.spawn(function()
 
     end
 
+end)
+
+--==================================================
+-- AUTO RECONNECT (DISCONNECT PROMPT ONLY)
+--==================================================
+
+local function normalizePromptText(text)
+    return string.lower(tostring(text or "")):gsub("%s+", " ")
+end
+
+local function findDisconnectReconnectButton()
+    local promptGui = CoreGui:FindFirstChild("RobloxPromptGui")
+    if not promptGui then
+        return nil
+    end
+
+    local promptOverlay = promptGui:FindFirstChild("promptOverlay")
+    if not promptOverlay then
+        return nil
+    end
+
+    local reconnectButton = nil
+    local hasReconnectText = false
+    local hasLeaveText = false
+
+    for _, obj in ipairs(promptOverlay:GetDescendants()) do
+        if obj:IsA("TextButton") then
+            local text = normalizePromptText(obj.Text)
+            local name = normalizePromptText(obj.Name)
+
+            if text:find("reconnect", 1, true)
+                or name:find("reconnect", 1, true) then
+                reconnectButton = obj
+                hasReconnectText = true
+            end
+
+            if text == "leave"
+                or text:find("leave", 1, true)
+                or name:find("leave", 1, true) then
+                hasLeaveText = true
+            end
+        elseif obj:IsA("TextLabel") then
+            local text = normalizePromptText(obj.Text)
+
+            if text:find("reconnect", 1, true) then
+                hasReconnectText = true
+            end
+
+            if text:find("leave", 1, true) then
+                hasLeaveText = true
+            end
+        end
+    end
+
+    -- Important: only treat it as the disconnect prompt when BOTH choices exist.
+    if reconnectButton and hasReconnectText and hasLeaveText then
+        return reconnectButton
+    end
+
+    return nil
+end
+
+local function pressReconnectButton(button)
+    if reconnectClickBusy then
+        return
+    end
+
+    -- Re-check the blacklist/teleport locks at the exact moment of clicking.
+    -- This prevents a race condition where Blacklist is detected just after
+    -- the disconnect prompt was found.
+    if blacklistEscapeActive or teleporting or not autoReconnectEnabled then
+        return
+    end
+
+    if not button or not button.Parent or not button.Visible then
+        return
+    end
+
+    reconnectClickBusy = true
+
+    -- Check once more after taking the click lock.
+    if blacklistEscapeActive or teleporting or not autoReconnectEnabled then
+        reconnectClickBusy = false
+        return
+    end
+
+    local clicked = false
+
+    -- Executor-friendly method when firesignal is available.
+    if firesignal then
+        clicked = pcall(function()
+            firesignal(button.Activated)
+        end)
+    end
+
+    -- Fallback: physically click the center of the Reconnect button.
+    if not clicked then
+        pcall(function()
+            local pos = button.AbsolutePosition
+            local size = button.AbsoluteSize
+            local x = pos.X + (size.X / 2)
+            local y = pos.Y + (size.Y / 2)
+
+            -- Final safety check immediately before input is sent.
+            if blacklistEscapeActive or teleporting then
+                return
+            end
+
+            VirtualInputManager:SendMouseButtonEvent(
+                x, y, 0, true, game, 0
+            )
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(
+                x, y, 0, false, game, 0
+            )
+        end)
+    end
+
+    task.wait(1.5)
+    reconnectClickBusy = false
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+
+        -- Never reconnect while blacklist escape / teleport logic is active.
+        if autoReconnectEnabled
+            and not blacklistEscapeActive
+            and not teleporting
+            and not reconnectClickBusy then
+
+            local reconnectButton = findDisconnectReconnectButton()
+
+            if reconnectButton then
+                pressReconnectButton(reconnectButton)
+            end
+        end
+    end
 end)
 
 --==================================================
@@ -830,6 +1005,11 @@ Tab:Button({
 if Config then
 
     Config:Register(
+        "AutoReconnect",
+        AutoReconnectToggle
+    )
+
+    Config:Register(
         "AutoChangeServer",
         AutoChangeServerToggle
     )
@@ -870,6 +1050,13 @@ configLoaded = true
 --==================================================
 -- READ LOADED CONFIG
 --==================================================
+
+if AutoReconnectToggle then
+
+    autoReconnectEnabled =
+        AutoReconnectToggle.Value
+
+end
 
 if AutoChangeServerToggle then
 
