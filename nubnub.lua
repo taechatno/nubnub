@@ -2,7 +2,6 @@ local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 --==================================================
 -- WINDUI
@@ -105,7 +104,7 @@ local AutoReconnectToggle
 
 AutoReconnectToggle = Tab:Toggle({
     Title = "Auto Reconnect",
-    Desc = "Press Reconnect only when the Leave / Reconnect disconnect prompt appears",
+    Desc = "Reconnect only when the Leave / Reconnect prompt appears",
     Flag = "AutoReconnect",
     Value = true,
 
@@ -511,7 +510,6 @@ local function checkTeleportData()
 
     -- New server is safe
     blacklistEscapeActive = false
-
     local webhookSuccess = sendWebhook(
 
         "๐ข Server Change Successful",
@@ -551,8 +549,6 @@ rejoinCurrentPlace = function()
         return
     end
 
-    -- Safety lock: while the blacklist system is leaving/rejoining,
-    -- Auto Reconnect must never send us back to the old server.
     blacklistEscapeActive = true
     teleporting = true
     retryCount += 1
@@ -710,9 +706,6 @@ local function checkServer()
         if otherPlayer ~= player
             and isBlacklisted(otherPlayer.Name) then
 
-            -- Lock Auto Reconnect BEFORE any leave / teleport work starts.
-            blacklistEscapeActive = true
-
             task.spawn(function()
 
                 sendWebhook(
@@ -786,139 +779,69 @@ task.spawn(function()
 end)
 
 --==================================================
--- AUTO RECONNECT (DISCONNECT PROMPT ONLY)
+-- AUTO RECONNECT PROMPT
 --==================================================
 
-local function normalizePromptText(text)
-    return string.lower(tostring(text or "")):gsub("%s+", " ")
-end
+local function getReconnectPromptButtons()
+    local overlay
 
-local function findDisconnectReconnectButton()
-    local promptGui = CoreGui:FindFirstChild("RobloxPromptGui")
-    if not promptGui then
-        return nil
+    local ok = pcall(function()
+        local promptGui = CoreGui:FindFirstChild("RobloxPromptGui")
+        local promptOverlay = promptGui and promptGui:FindFirstChild("promptOverlay")
+        if promptOverlay then
+            overlay = promptOverlay
+        end
+    end)
+
+    if not ok or not overlay then
+        return nil, nil
     end
 
-    local promptOverlay = promptGui:FindFirstChild("promptOverlay")
-    if not promptOverlay then
-        return nil
-    end
+    local reconnectButton
+    local leaveButton
 
-    local reconnectButton = nil
-    local hasReconnectText = false
-    local hasLeaveText = false
-
-    for _, obj in ipairs(promptOverlay:GetDescendants()) do
+    for _, obj in ipairs(overlay:GetDescendants()) do
         if obj:IsA("TextButton") then
-            local text = normalizePromptText(obj.Text)
-            local name = normalizePromptText(obj.Name)
+            local text = string.lower((obj.Text or ""):gsub("%s+", ""))
+            local name = string.lower(obj.Name or "")
 
-            if text:find("reconnect", 1, true)
-                or name:find("reconnect", 1, true) then
+            if text == "reconnect" or name == "reconnect" then
                 reconnectButton = obj
-                hasReconnectText = true
-            end
-
-            if text == "leave"
-                or text:find("leave", 1, true)
-                or name:find("leave", 1, true) then
-                hasLeaveText = true
-            end
-        elseif obj:IsA("TextLabel") then
-            local text = normalizePromptText(obj.Text)
-
-            if text:find("reconnect", 1, true) then
-                hasReconnectText = true
-            end
-
-            if text:find("leave", 1, true) then
-                hasLeaveText = true
+            elseif text == "leave" or name == "leave" then
+                leaveButton = obj
             end
         end
     end
 
-    -- Important: only treat it as the disconnect prompt when BOTH choices exist.
-    if reconnectButton and hasReconnectText and hasLeaveText then
-        return reconnectButton
-    end
-
-    return nil
-end
-
-local function pressReconnectButton(button)
-    if reconnectClickBusy then
-        return
-    end
-
-    -- Re-check the blacklist/teleport locks at the exact moment of clicking.
-    -- This prevents a race condition where Blacklist is detected just after
-    -- the disconnect prompt was found.
-    if blacklistEscapeActive or teleporting or not autoReconnectEnabled then
-        return
-    end
-
-    if not button or not button.Parent or not button.Visible then
-        return
-    end
-
-    reconnectClickBusy = true
-
-    -- Check once more after taking the click lock.
-    if blacklistEscapeActive or teleporting or not autoReconnectEnabled then
-        reconnectClickBusy = false
-        return
-    end
-
-    local clicked = false
-
-    -- Executor-friendly method when firesignal is available.
-    if firesignal then
-        clicked = pcall(function()
-            firesignal(button.Activated)
-        end)
-    end
-
-    -- Fallback: physically click the center of the Reconnect button.
-    if not clicked then
-        pcall(function()
-            local pos = button.AbsolutePosition
-            local size = button.AbsoluteSize
-            local x = pos.X + (size.X / 2)
-            local y = pos.Y + (size.Y / 2)
-
-            -- Final safety check immediately before input is sent.
-            if blacklistEscapeActive or teleporting then
-                return
-            end
-
-            VirtualInputManager:SendMouseButtonEvent(
-                x, y, 0, true, game, 0
-            )
-            task.wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(
-                x, y, 0, false, game, 0
-            )
-        end)
-    end
-
-    task.wait(1.5)
-    reconnectClickBusy = false
+    return reconnectButton, leaveButton
 end
 
 task.spawn(function()
     while true do
         task.wait(0.5)
 
-        -- Never reconnect while blacklist escape / teleport logic is active.
         if autoReconnectEnabled
             and not blacklistEscapeActive
             and not teleporting
             and not reconnectClickBusy then
 
-            local reconnectButton = findDisconnectReconnectButton()
+            local reconnectButton, leaveButton =
+                getReconnectPromptButtons()
 
-            if reconnectButton then
-                pressReconnectButton(reconnectButton)
+            if reconnectButton
+                and leaveButton
+                and reconnectButton.Visible
+                and leaveButton.Visible then
+
+                reconnectClickBusy = true
+
+                pcall(function()
+                    reconnectButton:Activate()
+                end)
+
+                task.delay(2, function()
+                    reconnectClickBusy = false
+                end)
             end
         end
     end
@@ -1055,7 +978,6 @@ if AutoReconnectToggle then
 
     autoReconnectEnabled =
         AutoReconnectToggle.Value
-
 end
 
 if AutoChangeServerToggle then
