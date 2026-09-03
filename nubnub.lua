@@ -1,7 +1,6 @@
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
-local CoreGui = game:GetService("CoreGui")
 
 --==================================================
 -- WINDUI
@@ -30,7 +29,6 @@ local FOUND_COLOR = 16776960
 local FAILED_COLOR = 16711680
 
 local enabled = true
-local autoReconnectEnabled = true
 local webhookEnabled = true
 
 local usernameValues = {}
@@ -38,7 +36,6 @@ local WebhookURL = ""
 
 local teleporting = false
 local blacklistEscapeActive = false
-local reconnectClickBusy = false
 local retryCount = 0
 local configLoaded = false
 
@@ -90,28 +87,6 @@ end
 local Tab = Window:Tab({
     Title = "Server",
     Icon = "users"
-})
-
---==================================================
--- CONNECTION RECOVERY
---==================================================
-
-Tab:Section({
-    Title = "Connection Recovery"
-})
-
-local AutoReconnectToggle
-
-AutoReconnectToggle = Tab:Toggle({
-    Title = "Auto Reconnect",
-    Desc = "Reconnect only when the Leave / Reconnect prompt appears",
-    Flag = "AutoReconnect",
-    Value = true,
-
-    Callback = function(value)
-        autoReconnectEnabled = value
-        saveConfig()
-    end
 })
 
 --==================================================
@@ -374,7 +349,7 @@ WebhookTab:Button({
         task.spawn(function()
 
             local success = sendWebhook(
-                "๐ข Server Change Successful",
+                "🟢 Server Change Successful",
 
                 "**Username:** test_webhook" ..
                 "\n**Display Name:** Test Webhook" ..
@@ -400,7 +375,7 @@ WebhookTab:Button({
 
                 WindUI:Notify({
                     Title = "Webhook",
-                    Content = "เธชเนเธ Webhook เนเธกเนเธชเธณเน€เธฃเนเธ",
+                    Content = "ส่ง Webhook ไม่สำเร็จ",
                     Icon = "triangle-alert",
                     Duration = 3
                 })
@@ -510,9 +485,10 @@ local function checkTeleportData()
 
     -- New server is safe
     blacklistEscapeActive = false
+
     local webhookSuccess = sendWebhook(
 
-        "๐ข Server Change Successful",
+        "🟢 Server Change Successful",
 
         "**Username:** " .. player.Name ..
         "\n**Display Name:** " .. player.DisplayName ..
@@ -558,7 +534,7 @@ rejoinCurrentPlace = function()
         task.spawn(function()
 
             sendWebhook(
-                "๐”ด Server Change Failed",
+                "🔴 Server Change Failed",
 
                 "Auto rejoin reached maximum attempts." ..
                 "\n**Attempts:** " ..
@@ -585,7 +561,7 @@ rejoinCurrentPlace = function()
         task.spawn(function()
 
             sendWebhook(
-                "๐”ต Server Rejoin Attempt",
+                "🔵 Server Rejoin Attempt",
 
                 "**Attempt:** " ..
                 retryCount .. "/" .. MAX_RETRY ..
@@ -664,7 +640,7 @@ rejoinCurrentPlace = function()
             task.spawn(function()
 
                 sendWebhook(
-                    "๐”ด Server Rejoin Failed",
+                    "🔴 Server Rejoin Failed",
 
                     "Teleport request could not be started." ..
                     "\n**Attempt:** " ..
@@ -709,7 +685,7 @@ local function checkServer()
             task.spawn(function()
 
                 sendWebhook(
-                    "๐ก Blacklisted Player Found",
+                    "🟡 Blacklisted Player Found",
 
                     "**Username:** " ..
                     otherPlayer.Name ..
@@ -776,75 +752,6 @@ task.spawn(function()
 
     end
 
-end)
-
---==================================================
--- AUTO RECONNECT PROMPT
---==================================================
-
-local function getReconnectPromptButtons()
-    local overlay
-
-    local ok = pcall(function()
-        local promptGui = CoreGui:FindFirstChild("RobloxPromptGui")
-        local promptOverlay = promptGui and promptGui:FindFirstChild("promptOverlay")
-        if promptOverlay then
-            overlay = promptOverlay
-        end
-    end)
-
-    if not ok or not overlay then
-        return nil, nil
-    end
-
-    local reconnectButton
-    local leaveButton
-
-    for _, obj in ipairs(overlay:GetDescendants()) do
-        if obj:IsA("TextButton") then
-            local text = string.lower((obj.Text or ""):gsub("%s+", ""))
-            local name = string.lower(obj.Name or "")
-
-            if text == "reconnect" or name == "reconnect" then
-                reconnectButton = obj
-            elseif text == "leave" or name == "leave" then
-                leaveButton = obj
-            end
-        end
-    end
-
-    return reconnectButton, leaveButton
-end
-
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-
-        if autoReconnectEnabled
-            and not blacklistEscapeActive
-            and not teleporting
-            and not reconnectClickBusy then
-
-            local reconnectButton, leaveButton =
-                getReconnectPromptButtons()
-
-            if reconnectButton
-                and leaveButton
-                and reconnectButton.Visible
-                and leaveButton.Visible then
-
-                reconnectClickBusy = true
-
-                pcall(function()
-                    reconnectButton:Activate()
-                end)
-
-                task.delay(2, function()
-                    reconnectClickBusy = false
-                end)
-            end
-        end
-    end
 end)
 
 --==================================================
@@ -928,11 +835,6 @@ Tab:Button({
 if Config then
 
     Config:Register(
-        "AutoReconnect",
-        AutoReconnectToggle
-    )
-
-    Config:Register(
         "AutoChangeServer",
         AutoChangeServerToggle
     )
@@ -973,12 +875,6 @@ configLoaded = true
 --==================================================
 -- READ LOADED CONFIG
 --==================================================
-
-if AutoReconnectToggle then
-
-    autoReconnectEnabled =
-        AutoReconnectToggle.Value
-end
 
 if AutoChangeServerToggle then
 
